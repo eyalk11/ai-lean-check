@@ -1,0 +1,140 @@
+name: AI Lean Check
+description: Generate a Lean 4 verification file from a pull-request diff and compile it with bounded AI repair attempts.
+author: eyalk11
+
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  provider:
+    description: Model provider. One of github, openai, anthropic, or xai.
+    required: false
+    default: github
+  model:
+    description: Provider model ID. Empty selects a provider-specific default.
+    required: false
+    default: ""
+  source-paths:
+    description: Newline-separated git pathspecs included in the pull-request diff.
+    required: false
+    default: "*.lean\n**/*.lean"
+  context-files:
+    description: Newline-separated glob patterns for files supplied as additional context.
+    required: false
+    default: ""
+  imports:
+    description: Newline-separated Lean modules the generated file should import.
+    required: false
+    default: ""
+  task:
+    description: Additional instructions describing the verification check to generate.
+    required: false
+    default: Generate meaningful compile-time checks for the changed Lean declarations.
+  max-repair-attempts:
+    description: Number of repair calls after the initial generation attempt.
+    required: false
+    default: "2"
+  output-file:
+    description: Path for the generated Lean file.
+    required: false
+    default: .ai-lean-check/GeneratedCheck.lean
+  setup-lean:
+    description: Whether to install the caller project's Lean toolchain.
+    required: false
+    default: "true"
+  build-project:
+    description: Whether lean-action should run lake build before generating the check.
+    required: false
+    default: "true"
+  use-mathlib-cache:
+    description: Passed to leanprover/lean-action.
+    required: false
+    default: auto
+  upload-artifact:
+    description: Upload the generated source and diagnostic log.
+    required: false
+    default: "true"
+  base-sha:
+    description: Base commit for diff collection. Defaults to the pull-request base SHA.
+    required: false
+    default: ""
+  head-sha:
+    description: Head commit for diff collection. Defaults to the checked-out commit.
+    required: false
+    default: ""
+  max-context-bytes:
+    description: Legacy byte cap for combined diff and context. Used only when max-input-tokens is empty.
+    required: false
+    default: "200000"
+  max-input-tokens:
+    description: Approximate maximum input tokens for diff and context. Empty uses max-context-bytes.
+    required: false
+    default: "50000"
+  max-output-tokens:
+    description: Maximum output tokens requested from the provider per attempt.
+    required: false
+    default: "8192"
+  deps-sorry-policy:
+    description: Handling of sorry/admit inside dependency files. One of warn or reject. Outside dependency files always fails.
+    required: false
+    default: warn
+  sorry-allowed-files:
+    description: Newline-separated glob patterns where baseline assumptions may use sorry/admit.
+    required: false
+    default: "**/*_deps.lean"
+
+outputs:
+  generated-file:
+    description: Path to the last generated Lean file.
+    value: ${{ steps.generate.outputs.generated-file }}
+  attempts:
+    description: Number of model calls made.
+    value: ${{ steps.generate.outputs.attempts }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up and build Lean project
+      if: inputs.setup-lean == 'true'
+      uses: leanprover/lean-action@v1
+      with:
+        auto-config: false
+        build: ${{ inputs.build-project }}
+        test: false
+        lint: false
+        use-mathlib-cache: ${{ inputs.use-mathlib-cache }}
+
+    - name: Generate and compile Lean check
+      id: generate
+      shell: bash
+      env:
+        AI_LEAN_PROVIDER: ${{ inputs.provider }}
+        AI_LEAN_MODEL: ${{ inputs.model }}
+        AI_LEAN_SOURCE_PATHS: ${{ inputs.source-paths }}
+        AI_LEAN_CONTEXT_FILES: ${{ inputs.context-files }}
+        AI_LEAN_IMPORTS: ${{ inputs.imports }}
+        AI_LEAN_TASK: ${{ inputs.task }}
+        AI_LEAN_MAX_REPAIRS: ${{ inputs.max-repair-attempts }}
+        AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
+        AI_LEAN_BASE_SHA: ${{ inputs.base-sha }}
+        AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
+        AI_LEAN_MAX_CONTEXT_BYTES: ${{ inputs.max-context-bytes }}
+        AI_LEAN_MAX_INPUT_TOKENS: ${{ inputs.max-input-tokens }}
+        AI_LEAN_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
+        AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
+        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
+        GITHUB_MODELS_TOKEN: ${{ github.token }}
+        AI_LEAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py"
+
+    - name: Upload generated Lean check
+      if: always() && inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-lean-check
+        path: |
+          ${{ inputs.output-file }}
+          ${{ inputs.output-file }}.diagnostics.txt
+        if-no-files-found: warn

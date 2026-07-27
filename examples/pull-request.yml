@@ -1,0 +1,32 @@
+name: AI Lean Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: eyalk11/ai-lean-check@v1
+        with:
+          provider: github
+          model: openai/gpt-4o
+          source-paths: |
+            *.lean
+            **/*.lean
+          context-files: |
+            lakefile.toml
+            lean-toolchain
+          imports: MyProject
+          task: Generate focused examples that exercise the declarations changed by this PR.
