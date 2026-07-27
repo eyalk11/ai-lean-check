@@ -1,17 +1,64 @@
 # AI Lean Check
 
-`ai-lean-check` is a generic GitHub composite action that turns Lean changes in a
-pull request into an additional machine-checked test:
-
-1. set up the caller's Lean/Lake project;
-2. collect the selected PR diff and project context;
-3. ask a selected model provider to generate a standalone Lean verification file;
-4. reject proof bypasses and compile-time system access;
-5. compile the file with `lake env lean`;
-6. return Lean diagnostics to the model for a bounded number of repairs.
+`ai-lean-check` is a generic GitHub composite action that turns Lean changes in
+a pull request into an additional machine-checked test.
 
 The generated file is temporary and uploaded with its final diagnostics as the
 `ai-lean-check` workflow artifact.
+
+## What it does, step by step
+
+1. **Checks out a complete Git history.** The caller checks out the pull
+   request with `fetch-depth: 0`, allowing the action to compare the configured
+   base and head commits.
+
+2. **Sets up the caller's Lean project.** Unless `setup-lean: false` is
+   selected, the action invokes `leanprover/lean-action@v1`. It installs the
+   toolchain declared by `lean-toolchain`, restores the Lake/Mathlib cache, and
+   runs `lake build` by default. This establishes a constant baseline that
+   already compiles before any AI-generated code is considered.
+
+3. **Checks the assumption-file discipline.** The action scans tracked files
+   selected by `source-paths`. A `sorry` or `admit` outside a configured
+   dependency file such as `theorem_3_11_deps.lean` always fails. Inside a
+   dependency file, `deps-sorry-policy` decides whether assumptions produce
+   warnings or failures.
+
+4. **Collects the relevant change.** The action creates a Git diff between the
+   PR base and head, limited by `source-paths`. If no matching Lean change is
+   present, the job exits successfully without calling a model.
+
+5. **Builds bounded model context.** Files matched by `context-files` are
+   appended to the diff. The diff is placed first so it survives truncation.
+   `max-input-tokens` limits the approximate context size.
+
+6. **Requests a standalone Lean check.** The selected GitHub Models, OpenAI,
+   Anthropic, or xAI model receives the change, context, required imports, and
+   task. It must return structured JSON containing one complete Lean source
+   file. GitHub Models is the default and uses the workflow's temporary
+   `GITHUB_TOKEN`.
+
+7. **Validates the generated source before execution.** The action rejects
+   generated `sorry`, `admit`, axioms, unsafe declarations, `run_cmd`, `#eval`,
+   `#compile`, initializers, foreign declarations, and direct `IO` or `System`
+   access. It also verifies every module named by `imports` is imported.
+
+8. **Compiles the candidate with Lean.** Provider credentials are removed from
+   the compiler environment, then the action runs:
+
+   ```sh
+   lake env lean .ai-lean-check/GeneratedCheck.lean
+   ```
+
+9. **Repairs bounded failures.** If validation or compilation fails, the
+   diagnostics are sent back to the same model and it must replace the entire
+   candidate. `max-repair-attempts` limits this loop. With the default of `2`,
+   the action makes at most three model calls: one generation and two repairs.
+
+10. **Publishes an auditable result.** On success, the job returns the generated
+    file path and number of attempts. On success or failure, the final candidate
+    and diagnostics are uploaded as the `ai-lean-check` artifact when
+    `upload-artifact: true`. The action never commits generated code.
 
 ## Usage
 
@@ -103,13 +150,19 @@ If no matching changes exist, generation is skipped successfully,
 | --- | --- | --- |
 | `max-input-tokens` | `50000` | Positive integer approximate cap for the combined diff and context; set to an empty string to use `max-context-bytes` |
 | `max-context-bytes` | `200000` | Positive integer legacy byte cap; ignored when `max-input-tokens` is non-empty |
-| `max-output-tokens` | `8192` | Positive integer sent to the provider for each model call |
+| `max-output-tokens` | `32768` | Positive integer sent to the provider for each model call |
 | `max-repair-attempts` | `2` | Non-negative integer repairs after the initial attempt; total calls are at most this value plus one |
 
 `max-input-tokens` is converted to a byte budget using four UTF-8 bytes per
 token. This is deliberately approximate because each provider uses a different
 tokenizer. Truncation affects the end of the combined context; the diff is
 placed first so it has priority.
+
+The `32768` output-token default leaves room for substantial Lean definitions,
+proof terms, and compiler-driven repair. It is a maximum, not a reservation:
+providers charge for tokens actually generated. Lower it for short declaration
+checks or raise it when the selected model supports a larger output and the
+formalization genuinely requires it.
 
 Token caps constrain usage but do not establish a monetary budget. Provider
 prices, hidden reasoning tokens, caching, and failed/retried calls can differ.

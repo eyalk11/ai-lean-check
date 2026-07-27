@@ -153,7 +153,7 @@ def context_byte_limit() -> int:
 
 
 def max_output_tokens() -> int:
-    return int(env("AI_LEAN_MAX_OUTPUT_TOKENS", "8192"))
+    return int(env("AI_LEAN_MAX_OUTPUT_TOKENS", "32768"))
 
 
 def build_prompt(diff: str, context: str, diagnostics: str = "") -> str:

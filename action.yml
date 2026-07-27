@@ -74,7 +74,7 @@ inputs:
   max-output-tokens:
     description: Maximum output tokens requested from the provider per attempt.
     required: false
-    default: "8192"
+    default: "32768"
   deps-sorry-policy:
     description: Handling of sorry/admit inside dependency files. One of warn or reject. Outside dependency files always fails.
     required: false

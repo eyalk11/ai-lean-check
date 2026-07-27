@@ -37,6 +37,10 @@ class AILeanCheckTests(unittest.TestCase):
             self.assertEqual(MODULE.chat_payload("github", "prompt")["max_tokens"], 1234)
             self.assertEqual(MODULE.anthropic_payload("prompt")["max_tokens"], 1234)
 
+    def test_default_output_token_limit(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(MODULE.max_output_tokens(), 32768)
+
     def test_chat_payload_uses_strict_schema(self):
         with patch.dict(os.environ, {"AI_LEAN_MODEL": "test-model"}):
             payload = MODULE.chat_payload("github", "prompt")
