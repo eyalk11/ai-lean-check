@@ -13,3 +13,5 @@ Expand each occurrence of “plus one” as a successor. Adding a successor on t
 right produces the successor of the sum, so doing this twice produces two
 successors. The right-hand side also adds two successors to `n + n`. Therefore
 both sides are equal.
+
+The formal result should quantify explicitly over `n : Nat`.

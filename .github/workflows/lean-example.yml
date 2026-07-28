@@ -41,10 +41,10 @@ jobs:
           base-sha: ${{ github.event.before || github.event.pull_request.base.sha || format('{0}^', github.sha) }}
           head-sha: ${{ github.sha }}
           source-paths: |
-            proofs/**/*.md
+            proofs/*.md
           context-files: |
             Simple.lean
-            proofs/**/*.md
+            proofs/*.md
             lakefile.toml
             lean-toolchain
           imports: |
