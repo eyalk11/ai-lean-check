@@ -1,5 +1,5 @@
 name: AI Lean Check
-description: Generate a Lean 4 verification file from a pull-request diff and compile it with bounded AI repair attempts.
+description: Generate Lean 4 verification files with a coding agent and compile them independently.
 author: eyalk11
 
 branding:
@@ -16,11 +16,11 @@ inputs:
     required: false
     default: ""
   source-paths:
-    description: Newline-separated git pathspecs included in the pull-request diff.
+    description: Deprecated and ignored; the coding agent inspects the Git diff directly.
     required: false
-    default: "*.lean\n**/*.lean"
+    default: ""
   context-files:
-    description: Newline-separated glob patterns for files supplied as additional context.
+    description: Deprecated and ignored; the coding agent reads repository files directly.
     required: false
     default: ""
   imports:
@@ -72,19 +72,19 @@ inputs:
     required: false
     default: ai-lean-check
   base-sha:
-    description: Base commit for diff collection. Defaults to the pull-request base SHA.
+    description: Base commit for the pull-request diff. Defaults to the pull-request base SHA.
     required: false
     default: ""
   head-sha:
-    description: Head commit for diff collection. Defaults to the checked-out commit.
+    description: Head commit for the pull-request diff. Defaults to the checked-out commit.
     required: false
     default: ""
   max-context-bytes:
-    description: Legacy byte cap for combined diff and context. Used only when max-input-tokens is empty.
+    description: Deprecated and ignored.
     required: false
     default: "200000"
   max-input-tokens:
-    description: Approximate maximum input tokens for diff and context. Empty uses max-context-bytes.
+    description: Deprecated and ignored in coding-agent mode.
     required: false
     default: "50000"
   max-output-tokens:
@@ -92,11 +92,11 @@ inputs:
     required: false
     default: "32768"
   deps-sorry-policy:
-    description: Handling of sorry/admit inside dependency files. One of warn or reject. Outside dependency files always fails.
+    description: Handling of sorry/admit inside designated dependency files. One of warn or reject.
     required: false
     default: warn
   sorry-allowed-files:
-    description: Newline-separated glob patterns where baseline assumptions may use sorry/admit.
+    description: Newline-separated dependency file globs where baseline assumptions may use sorry/admit.
     required: false
     default: "**/*_deps.lean"
 
@@ -136,21 +136,15 @@ runs:
       id: prepare-agent
       shell: bash
       env:
-        AI_LEAN_SOURCE_PATHS: ${{ inputs.source-paths }}
-        AI_LEAN_CONTEXT_FILES: ${{ inputs.context-files }}
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_TASK: ${{ inputs.task }}
         AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
         AI_LEAN_TARGET_FILES: ${{ inputs.target-files }}
         AI_LEAN_BASE_SHA: ${{ inputs.base-sha }}
         AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
-        AI_LEAN_MAX_CONTEXT_BYTES: ${{ inputs.max-context-bytes }}
-        AI_LEAN_MAX_INPUT_TOKENS: ${{ inputs.max-input-tokens }}
-        AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
-        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
         AI_LEAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --prepare-agent
+      run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
@@ -164,7 +158,7 @@ runs:
         prompt_file: .ai-lean-check/agent-prompt.md
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
-        allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+        allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(git diff:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
 
     - name: Generate and test with Codex
       if: inputs.provider == 'codex' && steps.prepare-agent.outputs.should-run == 'true'
