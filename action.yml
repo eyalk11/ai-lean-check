@@ -147,7 +147,7 @@ runs:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
         prompt_file: .ai-lean-check/agent-prompt.md
-        model: ${{ inputs.model }}
+        model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
         allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(.ai-lean-check/run-lean-sanitized.sh:*)
 
@@ -162,7 +162,7 @@ runs:
         openai-api-key: ${{ env.OPENAI_API_KEY }}
         prompt-file: .ai-lean-check/agent-prompt.md
         output-file: .ai-lean-check/codex-final.txt
-        model: ${{ inputs.model }}
+        model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         sandbox: workspace-write
         safety-strategy: drop-sudo
 

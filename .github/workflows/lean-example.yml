@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "**/*.lean"
+      - "proofs/**"
       - "lakefile.toml"
       - "lean-toolchain"
       - "action.yml"
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - "**/*.lean"
+      - "proofs/**"
       - "lakefile.toml"
       - "lean-toolchain"
       - "action.yml"
@@ -35,19 +37,21 @@ jobs:
         uses: ./
         with:
           provider: claude-code
+          model: claude-sonnet-4-6
           base-sha: ${{ github.event.before || github.event.pull_request.base.sha || format('{0}^', github.sha) }}
           head-sha: ${{ github.sha }}
           source-paths: |
-            Simple.lean
+            proofs/**/*.md
           context-files: |
             Simple.lean
+            proofs/**/*.md
             lakefile.toml
             lean-toolchain
           imports: |
             Simple
           task: |
-            Generate small examples that exercise
-            Simple.add_zero, Simple.add_one, and Simple.two_plus_two.
+            Formalize the changed human-language theorem and proof as a Lean
+            theorem. Keep the formalization faithful to the stated claim.
           deps-sorry-policy: reject
           max-input-tokens: "10000"
           max-output-tokens: "8192"

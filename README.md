@@ -91,7 +91,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | Input | Default | Meaning |
 |---|---|---|
 | `provider` | `claude-code` | Required mode: `claude-code` or `codex`; every other value fails |
-| `model` | empty | Optional model ID; empty uses the upstream agent's default |
+| `model` | Claude: `claude-sonnet-4-6`; Codex: upstream default | Optional explicit model ID |
 | `source-paths` | `*.lean`, `**/*.lean` | Newline-separated Git pathspecs used for diff collection and placeholder scanning |
 | `context-files` | empty | Newline-separated globs for additional read-only prompt context |
 | `imports` | empty | Newline-separated modules the generated file must import |
@@ -121,6 +121,27 @@ Suggested dependency naming:
 Lean/theorem_3_11_deps.lean
 Lean/theorem_3_11.lean
 ```
+
+## Additional Lean setup steps
+
+Add arbitrary setup steps to the caller workflow before `ai-lean-check`. If
+those steps install the toolchain and build the project, set `setup-lean:
+"false"` so the composite action does not repeat that work:
+
+```yaml
+      - uses: actions/checkout@v4
+      - name: Project-specific setup
+        run: ./scripts/prepare-lean-project.sh
+      - uses: eyalk11/ai-lean-check@main
+        with:
+          provider: claude-code
+          setup-lean: "false"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_CODE_KEY }}
+```
+
+This deliberately keeps arbitrary shell commands in the visible caller
+workflow instead of accepting an opaque command string as an action input.
 
 ## Credentials and isolation
 
