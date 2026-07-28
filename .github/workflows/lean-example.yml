@@ -29,21 +29,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Generate and verify a Lean check
         uses: ./
         with:
           provider: github
           model: openai/gpt-4.1
+          base-sha: ${{ github.event.before || github.event.pull_request.base.sha || format('{0}^', github.sha) }}
+          head-sha: ${{ github.sha }}
           source-paths: |
             Simple.lean
-          context-paths: |
+          context-files: |
             Simple.lean
             lakefile.toml
             lean-toolchain
-          prompt: |
-            Import Simple and generate small examples that exercise
+          imports: |
+            Simple
+          task: |
+            Generate small examples that exercise
             Simple.add_zero and Simple.add_one.
           deps-sorry-policy: reject
           max-input-tokens: "10000"
           max-output-tokens: "8192"
-          repair-attempts: "1"
+          max-repair-attempts: "1"

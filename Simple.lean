@@ -1,5 +1,6 @@
 namespace Simple
 
+-- Deliberately small declarations for the live AI-generated-check workflow.
 theorem add_zero (n : Nat) : n + 0 = n := by
   induction n with
   | zero => rfl
