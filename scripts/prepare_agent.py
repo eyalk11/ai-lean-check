@@ -39,6 +39,18 @@ def set_output(name: str, value: str) -> None:
             handle.write(f"{name}={value}\n")
 
 
+def exclude_action_artifacts() -> None:
+    exclude = Path(".git/info/exclude")
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+    pattern = "/output.txt"
+    if pattern not in existing.splitlines():
+        with exclude.open("a", encoding="utf-8") as handle:
+            if existing and not existing.endswith("\n"):
+                handle.write("\n")
+            handle.write(pattern + "\n")
+
+
 def remove_persisted_github_auth() -> None:
     sanitized = os.environ.copy()
     for name in (
@@ -148,6 +160,7 @@ unchanged tracked project still builds.
 def main() -> int:
     work = Path(".ai-lean-check")
     work.mkdir(parents=True, exist_ok=True)
+    exclude_action_artifacts()
     policy_problems = scan_disallowed_placeholders(
         lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
     )
