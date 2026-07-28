@@ -105,6 +105,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `build-project` | `"true"` | Run the initial `lake build` when Lean setup is enabled |
 | `use-mathlib-cache` | `auto` | Passed to `leanprover/lean-action` |
 | `upload-artifact` | `"true"` | Upload generated source, prompt, and diagnostics |
+| `artifact-name` | `ai-lean-check` | Artifact name; use a run-specific value when a separate publishing job downloads it |
 | `base-sha` | PR base or `HEAD^` | Explicit base revision for the Lean diff |
 | `head-sha` | PR head or `HEAD` | Explicit head revision for the Lean diff |
 | `max-context-bytes` | `200000` | Legacy context cap used only if `max-input-tokens` is empty |
@@ -220,9 +221,12 @@ write-capable GitHub credentials:
           source-pr: "123"
 ```
 
-The publish action independently confirms that every supplied path exists, is
-an added `.lean` file in Git diff, and that no tracked file was changed. It
-stages only those verified files, pushes a new branch, and opens a pull request.
+The publish action independently confirms that every supplied or discovered
+path is safe, exists, is an added `.lean` file in Git diff, and that no tracked
+file was changed. It stages only those verified files, disables Git hooks for
+commit and push, pushes a new branch, and opens a pull request. Run it in a
+fresh job and fresh checkout after downloading the verifier artifact; never
+give the generation job write permissions.
 
 ## Local checks
 

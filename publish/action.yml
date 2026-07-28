@@ -7,8 +7,9 @@ inputs:
     description: "GitHub token with contents: write and pull-requests: write."
     required: true
   generated-files:
-    description: Newline-separated verified Lean files, normally from ai-lean-check's generated-files output.
-    required: true
+    description: Optional newline-separated verified Lean files. Empty discovers added Lean files from Git diff.
+    required: false
+    default: ""
   base-branch:
     description: Branch against which the generated-files pull request is opened.
     required: true
@@ -61,7 +62,18 @@ runs:
 
         mapfile -t requested < <(printf '%s\n' "$INPUT_GENERATED_FILES" | sed '/^[[:space:]]*$/d')
         if [[ "${#requested[@]}" -eq 0 ]]; then
-          echo "::error::generated-files is empty"
+          mapfile -t untracked_lean < <(
+            git ls-files --others --exclude-standard -- '*.lean' '**/*.lean' | sort -u
+          )
+          if [[ "${#untracked_lean[@]}" -gt 0 ]]; then
+            git add --intent-to-add -- "${untracked_lean[@]}"
+          fi
+          mapfile -t requested < <(
+            git diff --name-only --diff-filter=A -- '*.lean' '**/*.lean' | sort -u
+          )
+        fi
+        if [[ "${#requested[@]}" -eq 0 ]]; then
+          echo "::error::No added Lean files were found"
           exit 1
         fi
 
@@ -69,6 +81,15 @@ runs:
           git diff --name-only --diff-filter=A -- '*.lean' '**/*.lean' | sort -u
         )
         for file in "${requested[@]}"; do
+          if [[ "$file" =~ [^A-Za-z0-9._/-] ||
+                "$file" == /* ||
+                "$file" == .git/* ||
+                "$file" == */../* ||
+                "$file" == ../* ||
+                "$file" == */.. ]]; then
+            echo "::error::Refusing unsafe generated path: $file"
+            exit 1
+          fi
           if [[ "$file" != *.lean || ! -f "$file" ]]; then
             echo "::error::Refusing missing or non-Lean generated file: $file"
             exit 1
@@ -95,9 +116,9 @@ runs:
         git add -- "${requested[@]}"
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git commit -m "$commit_message"
+        git -c core.hooksPath=/dev/null commit -m "$commit_message"
         gh auth setup-git
-        git push --set-upstream origin "$branch"
+        git -c core.hooksPath=/dev/null push --set-upstream origin "$branch"
         pr_url="$(gh pr create \
           --repo "$GITHUB_REPOSITORY" \
           --base "$INPUT_BASE_BRANCH" \

@@ -100,6 +100,12 @@ example : True := by
         cleaned = MODULE.lean_code_without_comments_or_strings(source)
         self.assertRegex(cleaned, r"\bsorry\b")
 
+    def test_generated_path_validation(self):
+        self.assertTrue(MODULE.safe_generated_path("lean/generated/proof_1.lean"))
+        self.assertFalse(MODULE.safe_generated_path("../escape.lean"))
+        self.assertFalse(MODULE.safe_generated_path(".git/hooks/pre-commit.lean"))
+        self.assertFalse(MODULE.safe_generated_path("lean/bad\noutput.lean"))
+
     def test_input_token_limit_uses_conservative_estimate(self):
         with patch.dict(os.environ, {"AI_LEAN_MAX_INPUT_TOKENS": "100"}):
             self.assertEqual(MODULE.context_byte_limit(), 400)

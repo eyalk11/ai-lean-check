@@ -67,6 +67,10 @@ inputs:
     description: Upload the generated source and diagnostic log.
     required: false
     default: "true"
+  artifact-name:
+    description: Name of the generated-files and diagnostics artifact.
+    required: false
+    default: ai-lean-check
   base-sha:
     description: Base commit for diff collection. Defaults to the pull-request base SHA.
     required: false
@@ -191,7 +195,7 @@ runs:
       if: always() && inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: ai-lean-check
+        name: ${{ inputs.artifact-name }}
         path: |
           ${{ steps.verify-agent.outputs.generated-files }}
           .ai-lean-check/diagnostics.txt
@@ -199,3 +203,4 @@ runs:
           .ai-lean-check/codex-final.txt
           .ai-lean-check/run-lean-sanitized.sh
         if-no-files-found: warn
+        include-hidden-files: true

@@ -472,6 +472,18 @@ def lean_code_without_comments_or_strings(source: str) -> str:
     return "".join(result)
 
 
+def safe_generated_path(filename: str) -> bool:
+    normalized = filename.replace("\\", "/")
+    path = PurePath(normalized)
+    return (
+        bool(re.fullmatch(r"[A-Za-z0-9._/-]+", normalized))
+        and not normalized.startswith("/")
+        and ".git" not in path.parts
+        and ".." not in path.parts
+        and path.suffix.lower() == ".lean"
+    )
+
+
 def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
     deps_policy = env("AI_LEAN_DEPS_SORRY_POLICY", "warn").strip().lower()
     if deps_policy not in {"warn", "reject"}:
@@ -689,6 +701,9 @@ def verify_agent_result() -> int:
         problems.append("agent added non-Lean project files: " + ", ".join(non_lean))
     if not generated:
         problems.append("coding agent added no untracked Lean files")
+    unsafe_paths = [filename for filename in generated if not safe_generated_path(filename)]
+    if unsafe_paths:
+        problems.append("unsafe generated Lean paths: " + ", ".join(unsafe_paths))
     if missing_targets:
         problems.append("missing requested Lean files: " + ", ".join(missing_targets))
     for filename in generated:
