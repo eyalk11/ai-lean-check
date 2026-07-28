@@ -110,6 +110,9 @@ class AILeanCheckTests(unittest.TestCase):
                 "OPENAI_API_KEY": "secret",
                 "GITHUB_TOKEN": "secret",
                 "GH_TOKEN": "secret",
+                "ACTIONS_RUNTIME_TOKEN": "secret",
+                "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "secret",
+                "ACTIONS_ID_TOKEN_REQUEST_URL": "secret",
                 "SAFE_VALUE": "kept",
             },
         ):
@@ -118,6 +121,9 @@ class AILeanCheckTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", sanitized)
         self.assertNotIn("GITHUB_TOKEN", sanitized)
         self.assertNotIn("GH_TOKEN", sanitized)
+        self.assertNotIn("ACTIONS_RUNTIME_TOKEN", sanitized)
+        self.assertNotIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", sanitized)
+        self.assertNotIn("ACTIONS_ID_TOKEN_REQUEST_URL", sanitized)
         self.assertEqual(sanitized["SAFE_VALUE"], "kept")
 
     def test_context_collection_deduplicates_files(self):

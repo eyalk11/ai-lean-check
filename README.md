@@ -98,6 +98,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `task` | Generate meaningful compile-time checks | Extra generation instructions |
 | `agent-max-turns` | `20` | Maximum Claude Code turns; ignored by Codex |
 | `output-file` | `.ai-lean-check/GeneratedCheck.lean` | Generated file path |
+| `verification-command` | empty | Additional shell verification run after mandatory checks with provider and GitHub credentials removed |
 | `setup-lean` | `"true"` | Run `leanprover/lean-action@v1` |
 | `build-project` | `"true"` | Run the initial `lake build` when Lean setup is enabled |
 | `use-mathlib-cache` | `auto` | Passed to `leanprover/lean-action` |
@@ -154,10 +155,24 @@ The caller passes exactly one provider credential:
 | Codex | `OPENAI_API_KEY` |
 
 The agent steps explicitly clear `GITHUB_TOKEN` and `GH_TOKEN`. The generated
-Lean wrapper clears provider credentials before invoking Lean. Claude Code gets
+Lean wrapper clears provider credentials, GitHub tokens, Actions runtime
+tokens, and OIDC request credentials before invoking Lean. The action also
+removes the checkout token persisted in the repository's Git HTTP configuration
+before the agent starts. Claude Code gets
 only read/edit tools plus that wrapper; Codex uses a workspace-write sandbox
 with sudo disabled. After the agent finishes, an independent verifier rejects
 any tracked-file or commit change.
+
+The optional `verification-command` runs last, after `lake env lean
+<output-file>` and `lake build`. It receives the same scrubbed environment and
+cannot reuse the checkout authorization header:
+
+```yaml
+        with:
+          verification-command: |
+            lake test
+            ./scripts/check-generated-proof.sh
+```
 
 Repository secrets are not provided to workflows triggered from untrusted
 forks. Use an environment approval rule, restrict the job to trusted branches,

@@ -56,5 +56,13 @@ jobs:
           max-input-tokens: "10000"
           max-output-tokens: "8192"
           max-repair-attempts: "1"
+          verification-command: |
+            test -z "${ANTHROPIC_API_KEY:-}"
+            test -z "${GITHUB_TOKEN:-}"
+            test -z "${GH_TOKEN:-}"
+            test -z "${ACTIONS_RUNTIME_TOKEN:-}"
+            test -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+            test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+            ! git config --local --get-all http.https://github.com/.extraheader
         env:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_CODE_KEY }}

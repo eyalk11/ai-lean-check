@@ -43,6 +43,10 @@ inputs:
     description: Path for the generated Lean file.
     required: false
     default: .ai-lean-check/GeneratedCheck.lean
+  verification-command:
+    description: Optional additional shell command run after mandatory Lean checks with provider and GitHub credentials removed.
+    required: false
+    default: ""
   setup-lean:
     description: Whether to install the caller project's Lean toolchain.
     required: false
@@ -173,6 +177,7 @@ runs:
       env:
         AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
+        AI_LEAN_VERIFICATION_COMMAND: ${{ inputs.verification-command }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --verify-agent
 
     - name: Upload generated Lean check

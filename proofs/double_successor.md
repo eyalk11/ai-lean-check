@@ -14,4 +14,5 @@ right produces the successor of the sum, so doing this twice produces two
 successors. The right-hand side also adds two successors to `n + n`. Therefore
 both sides are equal.
 
-The formal result should quantify explicitly over `n : Nat`.
+The formal result should quantify explicitly over `n : Nat` and use no
+unproved assumptions.

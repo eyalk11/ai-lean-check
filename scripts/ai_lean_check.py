@@ -485,9 +485,29 @@ def sanitized_process_env() -> dict[str, str]:
         "XAI_API_KEY",
         "GITHUB_TOKEN",
         "GH_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
     ):
         sanitized_env.pop(secret_name, None)
     return sanitized_env
+
+
+def remove_persisted_github_auth() -> None:
+    # actions/checkout normally stores its token as a repository-local HTTP
+    # extraheader. Removing environment variables alone would not block `git`
+    # from reusing that credential in an agent or custom verification command.
+    run(
+        [
+            "git",
+            "config",
+            "--local",
+            "--unset-all",
+            "http.https://github.com/.extraheader",
+        ],
+        check=False,
+        process_env=sanitized_process_env(),
+    )
 
 
 def set_output(name: str, value: str) -> None:
@@ -529,6 +549,7 @@ def prepare_agent() -> int:
         """#!/usr/bin/env bash
 set -euo pipefail
 unset GITHUB_TOKEN GH_TOKEN GITHUB_MODELS_TOKEN
+unset ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
 unset OPENAI_API_KEY ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN XAI_API_KEY
 case "${1:-}" in
   check) exec lake env lean "${AI_LEAN_GENERATED_FILE}" ;;
@@ -539,6 +560,7 @@ esac
         encoding="utf-8",
     )
     wrapper_path.chmod(0o700)
+    remove_persisted_github_auth()
     set_output("should-run", "true")
     return 0
 
@@ -600,6 +622,22 @@ def verify_agent_result() -> int:
         if result.returncode != 0:
             succeeded = False
             break
+    custom_command = env("AI_LEAN_VERIFICATION_COMMAND").strip()
+    if succeeded and custom_command:
+        remove_persisted_github_auth()
+        result = run(
+            ["bash", "--noprofile", "--norc", "-euo", "pipefail", "-c", custom_command],
+            check=False,
+            process_env=sanitized_process_env(),
+        )
+        section = [
+            "$ <custom verification command>",
+            f"exit_code={result.returncode}",
+            result.stdout.rstrip(),
+            result.stderr.rstrip(),
+        ]
+        log_sections.append("\n".join(part for part in section if part))
+        succeeded = result.returncode == 0
     diagnostics_path.write_text(
         "\n\n".join(log_sections) + "\n",
         encoding="utf-8",
