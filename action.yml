@@ -159,6 +159,7 @@ runs:
         prompt_file: .ai-lean-check/agent-prompt.md
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
+        timeout_minutes: "30"
         allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(git diff:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
 
     - name: Capture Claude diagnostics
