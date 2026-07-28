@@ -144,6 +144,8 @@ runs:
         AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
         AI_LEAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
+        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
@@ -160,7 +162,7 @@ runs:
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
         timeout_minutes: "30"
-        allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(git diff:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+        allowed_tools: Read,Glob,Grep,Write,Edit,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
 
     - name: Capture Claude diagnostics
       if: always() && inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
