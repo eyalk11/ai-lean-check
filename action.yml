@@ -207,7 +207,7 @@ runs:
         AI_LEAN_TARGET_FILES: ${{ inputs.target-files }}
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_VERIFICATION_COMMAND: ${{ inputs.verification-command }}
-      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --verify-agent
+      run: python3 "$GITHUB_ACTION_PATH/scripts/verify_agent.py"
 
     - name: Upload generated Lean check
       if: always() && inputs.upload-artifact == 'true'
