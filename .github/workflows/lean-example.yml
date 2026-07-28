@@ -1,0 +1,49 @@
+name: Lean example
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.lean"
+      - "lakefile.toml"
+      - "lean-toolchain"
+      - "action.yml"
+      - "scripts/**"
+      - ".github/workflows/lean-example.yml"
+  pull_request:
+    paths:
+      - "**/*.lean"
+      - "lakefile.toml"
+      - "lean-toolchain"
+      - "action.yml"
+      - "scripts/**"
+      - ".github/workflows/lean-example.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  generated-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate and verify a Lean check
+        uses: ./
+        with:
+          provider: github
+          model: openai/gpt-4.1
+          source-paths: |
+            Simple.lean
+          context-paths: |
+            Simple.lean
+            lakefile.toml
+            lean-toolchain
+          prompt: |
+            Import Simple and generate small examples that exercise
+            Simple.add_zero and Simple.add_one.
+          deps-sorry-policy: reject
+          max-input-tokens: "10000"
+          max-output-tokens: "8192"
+          repair-attempts: "1"

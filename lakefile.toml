@@ -1,0 +1,6 @@
+name = "ai-lean-check-example"
+version = "0.1.0"
+defaultTargets = ["Simple"]
+
+[[lean_lib]]
+name = "Simple"
