@@ -8,9 +8,9 @@ branding:
 
 inputs:
   provider:
-    description: Model provider or coding agent. One of github, openai, anthropic, xai, claude-code, or codex.
+    description: Coding agent. One of claude-code or codex.
     required: false
-    default: github
+    default: claude-code
   model:
     description: Provider model ID. Empty selects a provider-specific default.
     required: false
@@ -91,10 +91,10 @@ inputs:
 outputs:
   generated-file:
     description: Path to the last generated Lean file.
-    value: ${{ steps.verify-agent.outputs.generated-file || steps.generate.outputs.generated-file }}
+    value: ${{ steps.verify-agent.outputs.generated-file }}
   attempts:
-    description: Number of model calls made.
-    value: ${{ steps.verify-agent.outputs.attempts || steps.generate.outputs.attempts }}
+    description: Reserved for compatibility; coding-agent providers manage their own turns.
+    value: ${{ steps.verify-agent.outputs.attempts }}
 
 runs:
   using: composite
@@ -109,34 +109,16 @@ runs:
         lint: false
         use-mathlib-cache: ${{ inputs.use-mathlib-cache }}
 
-    - name: Generate and compile Lean check
-      id: generate
-      if: inputs.provider != 'claude-code' && inputs.provider != 'codex'
+    - name: Validate coding-agent provider
       shell: bash
-      env:
-        AI_LEAN_PROVIDER: ${{ inputs.provider }}
-        AI_LEAN_MODEL: ${{ inputs.model }}
-        AI_LEAN_SOURCE_PATHS: ${{ inputs.source-paths }}
-        AI_LEAN_CONTEXT_FILES: ${{ inputs.context-files }}
-        AI_LEAN_IMPORTS: ${{ inputs.imports }}
-        AI_LEAN_TASK: ${{ inputs.task }}
-        AI_LEAN_MAX_REPAIRS: ${{ inputs.max-repair-attempts }}
-        AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
-        AI_LEAN_BASE_SHA: ${{ inputs.base-sha }}
-        AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
-        AI_LEAN_MAX_CONTEXT_BYTES: ${{ inputs.max-context-bytes }}
-        AI_LEAN_MAX_INPUT_TOKENS: ${{ inputs.max-input-tokens }}
-        AI_LEAN_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
-        AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
-        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
-        GITHUB_MODELS_TOKEN: ${{ github.token }}
-        AI_LEAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py"
+      run: |
+        case "${{ inputs.provider }}" in
+          claude-code|codex) ;;
+          *) echo "::error::provider must be 'claude-code' or 'codex'"; exit 1 ;;
+        esac
 
     - name: Prepare coding-agent task
       id: prepare-agent
-      if: inputs.provider == 'claude-code' || inputs.provider == 'codex'
       shell: bash
       env:
         AI_LEAN_SOURCE_PATHS: ${{ inputs.source-paths }}

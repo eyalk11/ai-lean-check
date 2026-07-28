@@ -22,11 +22,11 @@ on:
 
 permissions:
   contents: read
-  models: read
 
 jobs:
   generated-check:
     runs-on: ubuntu-latest
+    environment: main
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,8 +34,7 @@ jobs:
       - name: Generate and verify a Lean check
         uses: ./
         with:
-          provider: github
-          model: openai/gpt-4.1
+          provider: claude-code
           base-sha: ${{ github.event.before || github.event.pull_request.base.sha || format('{0}^', github.sha) }}
           head-sha: ${{ github.sha }}
           source-paths: |
@@ -53,3 +52,5 @@ jobs:
           max-input-tokens: "10000"
           max-output-tokens: "8192"
           max-repair-attempts: "1"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_CODE_KEY }}
