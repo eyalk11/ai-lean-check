@@ -159,7 +159,6 @@ runs:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
         prompt_file: .ai-lean-check/agent-prompt.md
-        output_file: .ai-lean-check/claude-final.txt
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
         timeout_minutes: "30"
@@ -223,7 +222,6 @@ runs:
           .ai-lean-check/agent-prompt.md
           .ai-lean-check/claude-summary.txt
           .ai-lean-check/claude-execution.json
-          .ai-lean-check/claude-final.txt
           .ai-lean-check/codex-final.txt
           .ai-lean-check/run-lean-sanitized.sh
         if-no-files-found: warn
