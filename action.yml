@@ -147,7 +147,9 @@ runs:
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
+      id: claude-agent
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
+      continue-on-error: true
       uses: anthropics/claude-code-base-action@beta
       env:
         GITHUB_TOKEN: ""
@@ -159,6 +161,28 @@ runs:
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
         allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(git diff:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+
+    - name: Capture Claude diagnostics
+      if: always() && inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
+      shell: bash
+      env:
+        CLAUDE_CONCLUSION: ${{ steps.claude-agent.outputs.conclusion }}
+        CLAUDE_EXECUTION_FILE: ${{ steps.claude-agent.outputs.execution_file }}
+        CLAUDE_OUTCOME: ${{ steps.claude-agent.outcome }}
+      run: |
+        mkdir -p .ai-lean-check
+        {
+          echo "step_outcome=${CLAUDE_OUTCOME:-unknown}"
+          echo "conclusion=${CLAUDE_CONCLUSION:-unknown}"
+          echo "execution_file=${CLAUDE_EXECUTION_FILE:-}"
+        } > .ai-lean-check/claude-summary.txt
+        if [ -n "${CLAUDE_EXECUTION_FILE:-}" ] && [ -f "$CLAUDE_EXECUTION_FILE" ]; then
+          cp "$CLAUDE_EXECUTION_FILE" .ai-lean-check/claude-execution.json
+          echo "--- execution tail ---" >> .ai-lean-check/claude-summary.txt
+          tail -c 16000 "$CLAUDE_EXECUTION_FILE" >> .ai-lean-check/claude-summary.txt
+          printf '\n' >> .ai-lean-check/claude-summary.txt
+        fi
+        cat .ai-lean-check/claude-summary.txt
 
     - name: Generate and test with Codex
       if: inputs.provider == 'codex' && steps.prepare-agent.outputs.should-run == 'true'
@@ -176,7 +200,7 @@ runs:
 
     - name: Independently verify coding-agent result
       id: verify-agent
-      if: (inputs.provider == 'claude-code' || inputs.provider == 'codex') && steps.prepare-agent.outputs.should-run == 'true'
+      if: steps.prepare-agent.outputs.should-run == 'true' && (inputs.provider == 'codex' || steps.claude-agent.outcome == 'success')
       shell: bash
       env:
         AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
@@ -194,7 +218,16 @@ runs:
           ${{ steps.verify-agent.outputs.generated-files }}
           .ai-lean-check/diagnostics.txt
           .ai-lean-check/agent-prompt.md
+          .ai-lean-check/claude-summary.txt
+          .ai-lean-check/claude-execution.json
           .ai-lean-check/codex-final.txt
           .ai-lean-check/run-lean-sanitized.sh
         if-no-files-found: warn
         include-hidden-files: true
+
+    - name: Fail when Claude failed
+      if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true' && steps.claude-agent.outcome != 'success'
+      shell: bash
+      run: |
+        cat .ai-lean-check/claude-summary.txt || true
+        exit 1
