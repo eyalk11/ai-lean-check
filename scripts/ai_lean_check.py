@@ -412,6 +412,55 @@ def path_allowed(path: str, patterns: list[str]) -> bool:
     return any(candidate.match(pattern) for pattern in patterns)
 
 
+def lean_code_without_comments_or_strings(source: str) -> str:
+    result: list[str] = []
+    index = 0
+    block_depth = 0
+    in_string = False
+    while index < len(source):
+        pair = source[index : index + 2]
+        char = source[index]
+        if block_depth:
+            if pair == "/-":
+                block_depth += 1
+                result.extend("  ")
+                index += 2
+            elif pair == "-/":
+                block_depth -= 1
+                result.extend("  ")
+                index += 2
+            else:
+                result.append("\n" if char == "\n" else " ")
+                index += 1
+        elif in_string:
+            if char == "\\" and index + 1 < len(source):
+                result.extend("  ")
+                index += 2
+            elif char == '"':
+                in_string = False
+                result.append(" ")
+                index += 1
+            else:
+                result.append("\n" if char == "\n" else " ")
+                index += 1
+        elif pair == "--":
+            while index < len(source) and source[index] != "\n":
+                result.append(" ")
+                index += 1
+        elif pair == "/-":
+            block_depth = 1
+            result.extend("  ")
+            index += 2
+        elif char == '"':
+            in_string = True
+            result.append(" ")
+            index += 1
+        else:
+            result.append(char)
+            index += 1
+    return "".join(result)
+
+
 def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
     deps_policy = env("AI_LEAN_DEPS_SORRY_POLICY", "warn").strip().lower()
     if deps_policy not in {"warn", "reject"}:
@@ -427,9 +476,11 @@ def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
     dependency_findings: list[str] = []
     for filename in result.stdout.splitlines():
         path = Path(filename)
-        if not path.is_file():
+        if not path.is_file() or path.suffix.lower() != ".lean":
             continue
-        content = path.read_text(encoding="utf-8", errors="ignore")
+        content = lean_code_without_comments_or_strings(
+            path.read_text(encoding="utf-8", errors="ignore")
+        )
         is_dependency_file = path_allowed(filename, allowed_patterns)
         for line_number, source_line in enumerate(content.splitlines(), start=1):
             for placeholder in ("sorry", "admit"):

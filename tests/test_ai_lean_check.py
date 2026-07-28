@@ -85,6 +85,21 @@ class AILeanCheckTests(unittest.TestCase):
         self.assertTrue(MODULE.path_allowed("Lean/theorem_3_11_deps.lean", patterns))
         self.assertFalse(MODULE.path_allowed("Lean/theorem_3_11.lean", patterns))
 
+    def test_placeholder_scanner_ignores_comments_and_strings(self):
+        source = '''-- sorry
+/- outer admit /- nested sorry -/ done -/
+def message := "sorry and admit"
+example : True := by
+  trivial
+'''
+        cleaned = MODULE.lean_code_without_comments_or_strings(source)
+        self.assertNotRegex(cleaned, r"\b(?:sorry|admit)\b")
+
+    def test_placeholder_scanner_preserves_code(self):
+        source = "example : True := by\n  sorry\n"
+        cleaned = MODULE.lean_code_without_comments_or_strings(source)
+        self.assertRegex(cleaned, r"\bsorry\b")
+
     def test_input_token_limit_uses_conservative_estimate(self):
         with patch.dict(os.environ, {"AI_LEAN_MAX_INPUT_TOKENS": "100"}):
             self.assertEqual(MODULE.context_byte_limit(), 400)
