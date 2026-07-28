@@ -47,7 +47,7 @@ jobs:
             Simple
           task: |
             Generate small examples that exercise
-            Simple.add_zero and Simple.add_one.
+            Simple.add_zero, Simple.add_one, and Simple.two_plus_two.
           deps-sorry-policy: reject
           max-input-tokens: "10000"
           max-output-tokens: "8192"

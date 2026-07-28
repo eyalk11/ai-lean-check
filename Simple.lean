@@ -10,4 +10,7 @@ theorem add_zero (n : Nat) : n + 0 = n := by
 theorem add_one (n : Nat) : n + 1 = Nat.succ n := by
   simp
 
+theorem two_plus_two : 2 + 2 = 4 := by
+  rfl
+
 end Simple
