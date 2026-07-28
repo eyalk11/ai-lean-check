@@ -40,9 +40,13 @@ inputs:
     required: false
     default: "20"
   output-file:
-    description: Path for the generated Lean file.
+    description: Legacy single target file; used when target-files is empty.
     required: false
     default: .ai-lean-check/GeneratedCheck.lean
+  target-files:
+    description: Newline-separated Lean files the agent is asked to add. Additional untracked Lean files are also discovered and verified.
+    required: false
+    default: ""
   verification-command:
     description: Optional additional shell command run after mandatory Lean checks with provider and GitHub credentials removed.
     required: false
@@ -94,8 +98,11 @@ inputs:
 
 outputs:
   generated-file:
-    description: Path to the last generated Lean file.
+    description: First generated Lean file, for compatibility.
     value: ${{ steps.verify-agent.outputs.generated-file }}
+  generated-files:
+    description: Newline-separated generated Lean files discovered from Git.
+    value: ${{ steps.verify-agent.outputs.generated-files }}
   attempts:
     description: Reserved for compatibility; coding-agent providers manage their own turns.
     value: ${{ steps.verify-agent.outputs.attempts }}
@@ -130,6 +137,7 @@ runs:
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_TASK: ${{ inputs.task }}
         AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
+        AI_LEAN_TARGET_FILES: ${{ inputs.target-files }}
         AI_LEAN_BASE_SHA: ${{ inputs.base-sha }}
         AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
         AI_LEAN_MAX_CONTEXT_BYTES: ${{ inputs.max-context-bytes }}
@@ -146,7 +154,6 @@ runs:
       env:
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
-        AI_LEAN_GENERATED_FILE: ${{ inputs.output-file }}
       with:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
@@ -161,12 +168,11 @@ runs:
       env:
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
-        AI_LEAN_GENERATED_FILE: ${{ inputs.output-file }}
       with:
         openai-api-key: ${{ env.OPENAI_API_KEY }}
         prompt-file: .ai-lean-check/agent-prompt.md
         output-file: .ai-lean-check/codex-final.txt
-        model: ${{ inputs.model || 'claude-sonnet-4-6' }}
+        model: ${{ inputs.model }}
         sandbox: workspace-write
         safety-strategy: drop-sudo
 
@@ -176,6 +182,7 @@ runs:
       shell: bash
       env:
         AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
+        AI_LEAN_TARGET_FILES: ${{ inputs.target-files }}
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_VERIFICATION_COMMAND: ${{ inputs.verification-command }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --verify-agent
@@ -186,8 +193,8 @@ runs:
       with:
         name: ai-lean-check
         path: |
-          ${{ inputs.output-file }}
-          ${{ inputs.output-file }}.diagnostics.txt
+          ${{ steps.verify-agent.outputs.generated-files }}
+          .ai-lean-check/diagnostics.txt
           .ai-lean-check/agent-prompt.md
           .ai-lean-check/codex-final.txt
           .ai-lean-check/run-lean-sanitized.sh

@@ -113,9 +113,20 @@ example : True := by
             },
         ):
             prompt = MODULE.build_agent_prompt("diff", "context")
-        self.assertIn("run-lean-sanitized.sh check", prompt)
+        self.assertIn("run-lean-sanitized.sh check <file>", prompt)
         self.assertIn("run-lean-sanitized.sh build", prompt)
         self.assertIn("import MyProject", prompt)
+
+    def test_agent_prompt_lists_multiple_target_files(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AI_LEAN_TARGET_FILES": "Lean/GeneratedA.lean\nLean/GeneratedB.lean",
+            },
+        ):
+            prompt = MODULE.build_agent_prompt("diff", "context")
+        self.assertIn("`Lean/GeneratedA.lean`", prompt)
+        self.assertIn("`Lean/GeneratedB.lean`", prompt)
 
     def test_sanitized_environment_removes_agent_credentials(self):
         with patch.dict(
