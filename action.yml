@@ -149,7 +149,6 @@ runs:
     - name: Generate and test with Claude Code
       id: claude-agent
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
-      continue-on-error: true
       uses: anthropics/claude-code-base-action@beta
       env:
         GITHUB_TOKEN: ""
