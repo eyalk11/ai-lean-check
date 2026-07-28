@@ -32,11 +32,10 @@ The generated file is temporary and uploaded with its final diagnostics as the
    appended to the diff. The diff is placed first so it survives truncation.
    `max-input-tokens` limits the approximate context size.
 
-6. **Requests a standalone Lean check.** The selected GitHub Models, OpenAI,
-   Anthropic, or xAI model receives the change, context, required imports, and
-   task. It must return structured JSON containing one complete Lean source
-   file. GitHub Models is the default and uses the workflow's temporary
-   `GITHUB_TOKEN`.
+6. **Requests a standalone Lean check.** Direct providers return structured
+   JSON containing one complete Lean source file. In `claude-code` or `codex`
+   mode, a coding agent reads a generated task file, writes the Lean candidate,
+   and may run the permitted Lean commands while iterating.
 
 7. **Validates the generated source before execution.** The action rejects
    generated `sorry`, `admit`, axioms, unsafe declarations, `run_cmd`, `#eval`,
@@ -111,7 +110,7 @@ strings, so boolean values must be written as `true` or `false`.
 
 | Input | Default | Accepted values and behavior |
 | --- | --- | --- |
-| `provider` | `github` | Exactly `github`, `openai`, `anthropic`, or `xai` |
+| `provider` | `github` | `github`, `openai`, `anthropic`, `xai`, `claude-code`, or `codex` |
 | `model` | empty | A model ID understood by the selected provider; empty uses the provider default below |
 | `task` | Generate meaningful compile-time checks for the changed Lean declarations. | Free-form project instructions appended to the protected system prompt |
 
@@ -123,6 +122,8 @@ Provider defaults are:
 | `openai` | `gpt-5.6-terra` | `OPENAI_API_KEY` secret |
 | `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` secret |
 | `xai` | `grok-4.5` | `XAI_API_KEY` secret |
+| `claude-code` | Claude Code default | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
+| `codex` | Codex default | `OPENAI_API_KEY` |
 
 The model ID is not rewritten or validated against a static catalog. This lets
 callers select newer or account-specific models without updating the action.
@@ -152,6 +153,7 @@ If no matching changes exist, generation is skipped successfully,
 | `max-context-bytes` | `200000` | Positive integer legacy byte cap; ignored when `max-input-tokens` is non-empty |
 | `max-output-tokens` | `32768` | Positive integer sent to the provider for each model call |
 | `max-repair-attempts` | `2` | Non-negative integer repairs after the initial attempt; total calls are at most this value plus one |
+| `agent-max-turns` | `20` | Positive integer maximum turns for `claude-code`; unused by direct providers and Codex |
 
 `max-input-tokens` is converted to a byte budget using four UTF-8 bytes per
 token. This is deliberately approximate because each provider uses a different
@@ -237,6 +239,55 @@ xAI:
   env:
     XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
+
+### Coding-agent mode
+
+Claude Code with a long-lived OAuth token:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+
+  - uses: eyalk11/ai-lean-check@v1
+    with:
+      provider: claude-code
+      agent-max-turns: "20"
+      imports: MyProject
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+Codex:
+
+```yaml
+- uses: eyalk11/ai-lean-check@v1
+  with:
+    provider: codex
+    model: gpt-5.6-sol
+    imports: MyProject
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+Neither coding agent receives `GITHUB_TOKEN` or `GH_TOKEN`; both variables are
+explicitly empty in the agent environment. Repository permissions can remain
+`contents: read`. Claude Code runs through Anthropic's base action and its only
+shell permission is a generated wrapper that removes provider and GitHub
+credentials before running Lean. Codex runs through the official action in
+`workspace-write` sandbox mode with `drop-sudo`.
+
+After the agent finishes, a separate verifier confirms that `HEAD` and all
+tracked files are unchanged, rejects forbidden constructs, removes provider and
+GitHub credentials from the compiler environment, reruns `lake env lean
+<generated-file>` and `lake build`, and records the commands, exit codes,
+standard output, and standard error in
+`<generated-file>.diagnostics.txt`. This log—not the agent's claim—is
+authoritative.
 
 ### Outputs
 

@@ -8,7 +8,7 @@ branding:
 
 inputs:
   provider:
-    description: Model provider. One of github, openai, anthropic, or xai.
+    description: Model provider or coding agent. One of github, openai, anthropic, xai, claude-code, or codex.
     required: false
     default: github
   model:
@@ -35,6 +35,10 @@ inputs:
     description: Number of repair calls after the initial generation attempt.
     required: false
     default: "2"
+  agent-max-turns:
+    description: Maximum Claude Code turns in coding-agent mode.
+    required: false
+    default: "20"
   output-file:
     description: Path for the generated Lean file.
     required: false
@@ -87,10 +91,10 @@ inputs:
 outputs:
   generated-file:
     description: Path to the last generated Lean file.
-    value: ${{ steps.generate.outputs.generated-file }}
+    value: ${{ steps.verify-agent.outputs.generated-file || steps.generate.outputs.generated-file }}
   attempts:
     description: Number of model calls made.
-    value: ${{ steps.generate.outputs.attempts }}
+    value: ${{ steps.verify-agent.outputs.attempts || steps.generate.outputs.attempts }}
 
 runs:
   using: composite
@@ -107,6 +111,7 @@ runs:
 
     - name: Generate and compile Lean check
       id: generate
+      if: inputs.provider != 'claude-code' && inputs.provider != 'codex'
       shell: bash
       env:
         AI_LEAN_PROVIDER: ${{ inputs.provider }}
@@ -129,6 +134,65 @@ runs:
         AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py"
 
+    - name: Prepare coding-agent task
+      id: prepare-agent
+      if: inputs.provider == 'claude-code' || inputs.provider == 'codex'
+      shell: bash
+      env:
+        AI_LEAN_SOURCE_PATHS: ${{ inputs.source-paths }}
+        AI_LEAN_CONTEXT_FILES: ${{ inputs.context-files }}
+        AI_LEAN_IMPORTS: ${{ inputs.imports }}
+        AI_LEAN_TASK: ${{ inputs.task }}
+        AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
+        AI_LEAN_BASE_SHA: ${{ inputs.base-sha }}
+        AI_LEAN_HEAD_SHA: ${{ inputs.head-sha }}
+        AI_LEAN_MAX_CONTEXT_BYTES: ${{ inputs.max-context-bytes }}
+        AI_LEAN_MAX_INPUT_TOKENS: ${{ inputs.max-input-tokens }}
+        AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
+        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
+        AI_LEAN_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --prepare-agent
+
+    - name: Generate and test with Claude Code
+      if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
+      uses: anthropics/claude-code-base-action@beta
+      env:
+        GITHUB_TOKEN: ""
+        GH_TOKEN: ""
+        AI_LEAN_GENERATED_FILE: ${{ inputs.output-file }}
+      with:
+        claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+        anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
+        prompt_file: .ai-lean-check/agent-prompt.md
+        model: ${{ inputs.model }}
+        max_turns: ${{ inputs.agent-max-turns }}
+        allowed_tools: View,GlobTool,GrepTool,Write,Edit,Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+
+    - name: Generate and test with Codex
+      if: inputs.provider == 'codex' && steps.prepare-agent.outputs.should-run == 'true'
+      uses: openai/codex-action@v1
+      env:
+        GITHUB_TOKEN: ""
+        GH_TOKEN: ""
+        AI_LEAN_GENERATED_FILE: ${{ inputs.output-file }}
+      with:
+        openai-api-key: ${{ env.OPENAI_API_KEY }}
+        prompt-file: .ai-lean-check/agent-prompt.md
+        output-file: .ai-lean-check/codex-final.txt
+        model: ${{ inputs.model }}
+        sandbox: workspace-write
+        safety-strategy: drop-sudo
+
+    - name: Independently verify coding-agent result
+      id: verify-agent
+      if: (inputs.provider == 'claude-code' || inputs.provider == 'codex') && steps.prepare-agent.outputs.should-run == 'true'
+      shell: bash
+      env:
+        AI_LEAN_OUTPUT_FILE: ${{ inputs.output-file }}
+        AI_LEAN_IMPORTS: ${{ inputs.imports }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/ai_lean_check.py" --verify-agent
+
     - name: Upload generated Lean check
       if: always() && inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@v4
@@ -137,4 +201,7 @@ runs:
         path: |
           ${{ inputs.output-file }}
           ${{ inputs.output-file }}.diagnostics.txt
+          .ai-lean-check/agent-prompt.md
+          .ai-lean-check/codex-final.txt
+          .ai-lean-check/run-lean-sanitized.sh
         if-no-files-found: warn

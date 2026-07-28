@@ -89,6 +89,37 @@ class AILeanCheckTests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_LEAN_MAX_INPUT_TOKENS": "100"}):
             self.assertEqual(MODULE.context_byte_limit(), 400)
 
+    def test_agent_prompt_requires_both_lean_checks(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AI_LEAN_OUTPUT_FILE": ".ai-lean-check/Test.lean",
+                "AI_LEAN_IMPORTS": "MyProject",
+            },
+        ):
+            prompt = MODULE.build_agent_prompt("diff", "context")
+        self.assertIn("run-lean-sanitized.sh check", prompt)
+        self.assertIn("run-lean-sanitized.sh build", prompt)
+        self.assertIn("import MyProject", prompt)
+
+    def test_sanitized_environment_removes_agent_credentials(self):
+        with patch.dict(
+            os.environ,
+            {
+                "CLAUDE_CODE_OAUTH_TOKEN": "secret",
+                "OPENAI_API_KEY": "secret",
+                "GITHUB_TOKEN": "secret",
+                "GH_TOKEN": "secret",
+                "SAFE_VALUE": "kept",
+            },
+        ):
+            sanitized = MODULE.sanitized_process_env()
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", sanitized)
+        self.assertNotIn("OPENAI_API_KEY", sanitized)
+        self.assertNotIn("GITHUB_TOKEN", sanitized)
+        self.assertNotIn("GH_TOKEN", sanitized)
+        self.assertEqual(sanitized["SAFE_VALUE"], "kept")
+
     def test_context_collection_deduplicates_files(self):
         with tempfile.TemporaryDirectory() as directory:
             original = os.getcwd()
