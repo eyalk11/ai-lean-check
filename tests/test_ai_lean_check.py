@@ -177,6 +177,39 @@ example : True := by
                 os.chdir(original)
         self.assertEqual(context.count("===== A.lean ====="), 1)
 
+    def _declared_check_files(self, contents, generated):
+        with tempfile.TemporaryDirectory() as directory:
+            original = os.getcwd()
+            os.chdir(directory)
+            try:
+                if contents is not None:
+                    Path(".ai-lean-check").mkdir()
+                    Path(".ai-lean-check/check-files.txt").write_text(
+                        contents, encoding="utf-8"
+                    )
+                return MODULE.declared_check_files(generated)
+            finally:
+                os.chdir(original)
+
+    def test_no_declaration_checks_every_generated_file(self):
+        requested, rejected = self._declared_check_files(None, ["lean/A.lean"])
+        self.assertEqual((requested, rejected), ([], []))
+
+    def test_declaration_selects_named_generated_files(self):
+        requested, rejected = self._declared_check_files(
+            "lean/B.lean\n\n  lean/A.lean  \n", ["lean/A.lean", "lean/B.lean"]
+        )
+        self.assertEqual(requested, ["lean/B.lean", "lean/A.lean"])
+        self.assertEqual(rejected, [])
+
+    def test_declaration_rejects_files_the_agent_did_not_generate(self):
+        requested, rejected = self._declared_check_files(
+            "lean/A.lean\nlean/pre_existing.lean\n../etc/passwd.lean\n",
+            ["lean/A.lean"],
+        )
+        self.assertEqual(requested, ["lean/A.lean"])
+        self.assertEqual(rejected, ["lean/pre_existing.lean", "../etc/passwd.lean"])
+
 
 if __name__ == "__main__":
     unittest.main()

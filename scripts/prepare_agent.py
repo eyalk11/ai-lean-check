@@ -122,6 +122,12 @@ unchanged tracked project still builds.
 7. Run `.ai-lean-check/run-lean-sanitized.sh check <file>` for every added file.
 8. Fix compiler failures and rerun the specific check.
 9. Run `.ai-lean-check/run-lean-sanitized.sh build` before finishing.
+9a. Optional: if your files import one another, write the entry points you want
+    compiled to `.ai-lean-check/check-files.txt`, one project-relative path per
+    line. The verifier then compiles exactly those instead of every added file.
+    Every path must be a file you added; naming anything else fails the run.
+    Omit the file to have all added files compiled. The project build command
+    runs either way.
 10. Run all shell commands in the foreground. Do not request background execution
     and do not create log or scratch files outside `.ai-lean-check`.
 11. Before finishing, run `git status --short` and confirm that every change is

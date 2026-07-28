@@ -223,6 +223,7 @@ runs:
           .ai-lean-check/claude-summary.txt
           .ai-lean-check/claude-execution.json
           .ai-lean-check/codex-final.txt
+          .ai-lean-check/check-files.txt
           .ai-lean-check/run-lean-sanitized.sh
         if-no-files-found: warn
         include-hidden-files: true

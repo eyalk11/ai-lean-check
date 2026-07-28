@@ -484,6 +484,23 @@ def safe_generated_path(filename: str) -> bool:
     )
 
 
+def declared_check_files(generated: list[str]) -> tuple[list[str], list[str]]:
+    """Lean files the coding agent asked to have compiled individually.
+
+    Restricted to the agent's own additions: naming a file it did not generate
+    would point the verifier at unrelated project sources. Returns the accepted
+    names and the rejected ones, so the caller can fail on a bad declaration
+    instead of silently checking something else.
+    """
+    declaration = Path(".ai-lean-check/check-files.txt")
+    if not declaration.is_file():
+        return [], []
+    requested = lines(declaration.read_text(encoding="utf-8", errors="ignore"))
+    allowed = [name for name in requested if name in generated]
+    rejected = [name for name in requested if name not in generated]
+    return allowed, rejected
+
+
 def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
     deps_policy = env("AI_LEAN_DEPS_SORRY_POLICY", "warn").strip().lower()
     if deps_policy not in {"warn", "reject"}:
@@ -709,6 +726,12 @@ def verify_agent_result() -> int:
     for filename in generated:
         code = Path(filename).read_text(encoding="utf-8")
         problems.extend(f"{filename}: {problem}" for problem in validate(code))
+    requested, rejected = declared_check_files(generated)
+    if rejected:
+        problems.append(
+            "requested check files are not generated Lean additions: "
+            + ", ".join(rejected)
+        )
     if problems:
         diagnostics = "\n".join(problems) + "\n"
         diagnostics_path.write_text(diagnostics, encoding="utf-8")
@@ -717,7 +740,10 @@ def verify_agent_result() -> int:
 
     log_sections: list[str] = []
     succeeded = True
-    commands = [["lake", "env", "lean", filename] for filename in generated]
+    # An agent that splits its work across importing files can name the entry
+    # points rather than have every file compiled separately. The project build
+    # command runs either way, so it stays the default verification.
+    commands = [["lake", "env", "lean", filename] for filename in requested or generated]
     commands.append(["lake", "build"])
     for command in commands:
         result = run(
