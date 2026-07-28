@@ -1,0 +1,235 @@
+name: Reusable AI Lean PR
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: Pull request number; zero infers it from a pull_request caller event.
+        required: false
+        default: 0
+        type: number
+      environment-name:
+        description: Caller-repository environment containing provider secrets.
+        required: false
+        default: main
+        type: string
+      runner:
+        description: GitHub Actions runner label.
+        required: false
+        default: ubuntu-latest
+        type: string
+      provider:
+        description: claude-code or codex.
+        required: false
+        default: claude-code
+        type: string
+      model:
+        description: Optional model ID.
+        required: false
+        default: ""
+        type: string
+      setup-command:
+        description: Project-specific setup and initial build commands.
+        required: false
+        default: lake build
+        type: string
+      setup-lean:
+        description: Run leanprover/lean-action before setup-command.
+        required: false
+        default: true
+        type: boolean
+      use-mathlib-cache:
+        description: Value passed to leanprover/lean-action.
+        required: false
+        default: auto
+        type: string
+      source-paths:
+        description: Newline-separated Git pathspecs included in the PR diff.
+        required: false
+        default: |
+          *.lean
+          **/*.lean
+        type: string
+      context-files:
+        description: Newline-separated context globs.
+        required: false
+        default: ""
+        type: string
+      imports:
+        description: Newline-separated required imports.
+        required: false
+        default: ""
+        type: string
+      task:
+        description: Formalization instructions.
+        required: false
+        default: Formalize the changed proof in clearly named project Lean files.
+        type: string
+      max-input-tokens:
+        description: Approximate prompt input-token limit.
+        required: false
+        default: "50000"
+        type: string
+      agent-max-turns:
+        description: Maximum Claude Code turns.
+        required: false
+        default: "20"
+        type: string
+      deps-sorry-policy:
+        description: warn or reject inside designated dependency files.
+        required: false
+        default: warn
+        type: string
+      sorry-allowed-files:
+        description: Newline-separated dependency file globs.
+        required: false
+        default: "**/*_deps.lean"
+        type: string
+      verification-command:
+        description: Additional credential-free final verification command.
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: Open a child PR containing verified Lean additions.
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+
+jobs:
+  inspect:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_branch: ${{ steps.pr.outputs.head_branch }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+    steps:
+      - name: Read and validate the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefOid,headRefName,headRefOid,headRepositoryOwner)"
+          owner="$(jq -r '.headRepositoryOwner.login' <<<"$pr_json")"
+          if [[ "$owner" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "::error::Fork pull requests cannot receive provider secrets or generated commits."
+            exit 1
+          fi
+          {
+            echo "pr_number=$PR_NUMBER"
+            echo "base_sha=$(jq -r '.baseRefOid' <<<"$pr_json")"
+            echo "head_branch=$(jq -r '.headRefName' <<<"$pr_json")"
+            echo "head_sha=$(jq -r '.headRefOid' <<<"$pr_json")"
+          } >> "$GITHUB_OUTPUT"
+
+  generate:
+    needs: inspect
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ inputs.environment-name }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.inspect.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the caller's Lean toolchain
+        if: inputs.setup-lean
+        uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          build: false
+          test: false
+          lint: false
+          use-mathlib-cache: ${{ inputs.use-mathlib-cache }}
+
+      - name: Run project-specific Lean setup
+        env:
+          SETUP_COMMAND: ${{ inputs.setup-command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash --noprofile --norc -euo pipefail -c "$SETUP_COMMAND"
+
+      - name: Generate and independently verify Lean files
+        uses: eyalk11/ai-lean-check@main
+        with:
+          provider: ${{ inputs.provider }}
+          model: ${{ inputs.model }}
+          setup-lean: "false"
+          artifact-name: ai-lean-check-${{ github.run_id }}
+          base-sha: ${{ needs.inspect.outputs.base_sha }}
+          head-sha: ${{ needs.inspect.outputs.head_sha }}
+          source-paths: ${{ inputs.source-paths }}
+          context-files: ${{ inputs.context-files }}
+          imports: ${{ inputs.imports }}
+          task: ${{ inputs.task }}
+          max-input-tokens: ${{ inputs.max-input-tokens }}
+          agent-max-turns: ${{ inputs.agent-max-turns }}
+          deps-sorry-policy: ${{ inputs.deps-sorry-policy }}
+          sorry-allowed-files: ${{ inputs.sorry-allowed-files }}
+          verification-command: ${{ inputs.verification-command }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  publish:
+    needs: [inspect, generate]
+    if: inputs.publish && needs.generate.result == 'success'
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.inspect.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ai-lean-check-${{ github.run_id }}
+          path: .
+      - uses: eyalk11/ai-lean-check/publish@main
+        with:
+          github-token: ${{ github.token }}
+          base-branch: ${{ needs.inspect.outputs.head_branch }}
+          source-pr: ${{ needs.inspect.outputs.pr_number }}
+
+  report-failure:
+    needs: [inspect, generate]
+    if: always() && needs.inspect.result == 'success' && needs.generate.result == 'failure'
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment with safe failure link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.inspect.outputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="AI Lean generation or verification failed. Use the Lean diagnostics artifact and workflow log to repair the failing generated file, then run this task again.
+
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Diagnostics artifact, when available: ai-lean-check-${GITHUB_RUN_ID}"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"

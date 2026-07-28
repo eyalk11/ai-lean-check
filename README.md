@@ -228,6 +228,44 @@ commit and push, pushes a new branch, and opens a pull request. Run it in a
 fresh job and fresh checkout after downloading the verifier artifact; never
 give the generation job write permissions.
 
+## Complete reusable PR workflow
+
+Other repositories can call the complete isolated workflow as one caller job.
+The reusable workflow infers the PR number for `pull_request` callers; manual
+callers pass `pr-number`.
+
+```yaml
+jobs:
+  lean:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: eyalk11/ai-lean-check/.github/workflows/lean-pr.yml@main
+    with:
+      pr-number: ${{ inputs.pr_number }}
+      environment-name: main
+      setup-command: |
+        lake update
+        lake exe cache get
+        lake build
+      source-paths: |
+        Lean/*.lean
+        proofs/*.md
+      imports: MyProject
+      verification-command: lake build
+```
+
+`setup-command` contains all caller-specific preparation commands and runs only
+in the read-only generation job. The caller appears as one job, but the
+reusable workflow internally isolates PR inspection, AI generation, trusted
+publishing, and failure reporting on separate runners.
+
+For cross-repository use, the calling repository must allow the public reusable
+workflow and grant the shown token permissions. Prefer a release tag or commit
+SHA over `@main`. Repository or organization secrets may be passed explicitly;
+an `environment-name` attaches the caller repository's environment only to the
+generation job.
+
 ## Local checks
 
 ```bash
