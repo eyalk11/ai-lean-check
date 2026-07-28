@@ -192,9 +192,15 @@ Generate one complete Lean file now."""
 
 
 def build_agent_prompt(diff: str, context: str) -> str:
-    output = Path(env("AI_LEAN_OUTPUT_FILE", ".ai-lean-check/GeneratedCheck.lean"))
-    targets = lines(env("AI_LEAN_TARGET_FILES")) or [output.as_posix()]
-    target_block = "\n".join(f"- `{target}`" for target in targets)
+    legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
+    targets = lines(env("AI_LEAN_TARGET_FILES"))
+    if not targets and legacy_output:
+        targets = [Path(legacy_output).as_posix()]
+    target_block = (
+        "\n".join(f"- `{target}`" for target in targets)
+        if targets
+        else "- Choose clear project-relative `.lean` filenames based on the changed proof."
+    )
     imports = lines(env("AI_LEAN_IMPORTS"))
     import_block = "\n".join(f"import {module}" for module in imports)
     return f"""# AI Lean check task
@@ -582,8 +588,7 @@ def set_multiline_output(name: str, value: str) -> None:
 
 
 def prepare_agent() -> int:
-    output = Path(env("AI_LEAN_OUTPUT_FILE", ".ai-lean-check/GeneratedCheck.lean"))
-    output.parent.mkdir(parents=True, exist_ok=True)
+    Path(".ai-lean-check").mkdir(parents=True, exist_ok=True)
     pathspecs = lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
     diff = collect_diff(pathspecs)
     if not diff.strip():
@@ -630,8 +635,10 @@ esac
 
 
 def verify_agent_result() -> int:
-    legacy_output = Path(env("AI_LEAN_OUTPUT_FILE", ".ai-lean-check/GeneratedCheck.lean"))
-    targets = lines(env("AI_LEAN_TARGET_FILES")) or [legacy_output.as_posix()]
+    legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
+    targets = lines(env("AI_LEAN_TARGET_FILES"))
+    if not targets and legacy_output:
+        targets = [Path(legacy_output).as_posix()]
     diagnostics_path = Path(".ai-lean-check/diagnostics.txt")
     diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
     baseline_path = Path(".ai-lean-check/baseline-head.txt")
@@ -664,7 +671,18 @@ def verify_agent_result() -> int:
         if item.strip() and not item.replace("\\", "/").startswith(".ai-lean-check/")
     ]
     non_lean = [item for item in untracked if not item.lower().endswith(".lean")]
-    generated = sorted(item for item in untracked if item.lower().endswith(".lean"))
+    untracked_lean = sorted(item for item in untracked if item.lower().endswith(".lean"))
+    if untracked_lean:
+        run(["git", "add", "--intent-to-add", "--", *untracked_lean], check=False)
+    diff_result = run(
+        ["git", "diff", "--name-only", "--diff-filter=A", "--", "*.lean", "**/*.lean"],
+        check=False,
+    )
+    generated = sorted(
+        filename.strip()
+        for filename in diff_result.stdout.splitlines()
+        if filename.strip().lower().endswith(".lean")
+    )
     missing_targets = [target for target in targets if target not in generated]
     problems: list[str] = []
     if non_lean:

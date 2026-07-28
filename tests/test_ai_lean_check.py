@@ -128,6 +128,14 @@ example : True := by
         self.assertIn("`Lean/GeneratedA.lean`", prompt)
         self.assertIn("`Lean/GeneratedB.lean`", prompt)
 
+    def test_agent_prompt_can_choose_filenames(self):
+        with patch.dict(
+            os.environ,
+            {"AI_LEAN_TARGET_FILES": "", "AI_LEAN_OUTPUT_FILE": ""},
+        ):
+            prompt = MODULE.build_agent_prompt("diff", "context")
+        self.assertIn("Choose clear project-relative", prompt)
+
     def test_sanitized_environment_removes_agent_credentials(self):
         with patch.dict(
             os.environ,

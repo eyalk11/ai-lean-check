@@ -12,7 +12,8 @@ agent cannot modify committed project files.
 4. Gives Claude Code or Codex a constrained task to add one or more Lean files.
 5. Lets the agent run only a credential-scrubbing Lean wrapper.
 6. Confirms that `HEAD` and all tracked files are unchanged.
-7. Discovers untracked project files from Git and rejects non-Lean additions.
+7. Marks untracked additions as intent-to-add, discovers generated files with
+   `git diff --diff-filter=A`, and rejects non-Lean additions.
 8. Rejects unsafe escape hatches in every generated Lean source.
 9. Runs `lake env lean` on every generated file and reruns `lake build`.
 10. Uploads the generated files and diagnostics as `ai-lean-check`.
@@ -97,8 +98,8 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `imports` | empty | Newline-separated modules the generated file must import |
 | `task` | Generate meaningful compile-time checks | Extra generation instructions |
 | `agent-max-turns` | `20` | Maximum Claude Code turns; ignored by Codex |
-| `output-file` | `.ai-lean-check/GeneratedCheck.lean` | Legacy single target used when `target-files` is empty |
-| `target-files` | empty | Newline-separated project files the agent must add; additional untracked Lean files are discovered automatically |
+| `output-file` | empty | Legacy optional single target; empty lets the agent choose filenames |
+| `target-files` | empty | Optional requested project files; empty lets the agent choose filenames |
 | `verification-command` | empty | Additional shell verification run after mandatory checks with provider and GitHub credentials removed |
 | `setup-lean` | `"true"` | Run `leanprover/lean-action@v1` |
 | `build-project` | `"true"` | Run the initial `lake build` when Lean setup is enabled |

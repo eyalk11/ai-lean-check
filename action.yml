@@ -40,11 +40,11 @@ inputs:
     required: false
     default: "20"
   output-file:
-    description: Legacy single target file; used when target-files is empty.
+    description: Legacy optional single target file. Empty lets the agent choose project filenames.
     required: false
-    default: .ai-lean-check/GeneratedCheck.lean
+    default: ""
   target-files:
-    description: Newline-separated Lean files the agent is asked to add. Additional untracked Lean files are also discovered and verified.
+    description: Optional newline-separated Lean files to request. Empty lets the agent choose; additions are discovered through Git diff.
     required: false
     default: ""
   verification-command:
