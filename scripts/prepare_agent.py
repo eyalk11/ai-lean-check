@@ -6,6 +6,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+from ai_lean_check import scan_disallowed_placeholders
 
 
 def env(name: str, default: str = "") -> str:
@@ -139,6 +142,12 @@ unchanged tracked project still builds.
 def main() -> int:
     work = Path(".ai-lean-check")
     work.mkdir(parents=True, exist_ok=True)
+    policy_problems = scan_disallowed_placeholders(
+        lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
+    )
+    if policy_problems:
+        print("\n".join(policy_problems), file=sys.stderr)
+        return 1
     base, head = resolve_range()
     (work / "agent-prompt.md").write_text(build_prompt(base, head), encoding="utf-8")
     (work / "baseline-head.txt").write_text(
