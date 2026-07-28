@@ -1,21 +1,21 @@
 # AI Lean Check
 
 `ai-lean-check` is a GitHub composite action that asks Claude Code or Codex to
-generate a focused Lean verification file and then independently compiles it.
-The generated file is an artifact; the agent cannot modify committed project
-files.
+add focused Lean files to a project and then independently compiles them. The
+agent cannot modify committed project files.
 
 ## What it does
 
 1. Installs the toolchain from `lean-toolchain` and runs `lake build`.
 2. Rejects `sorry` or `admit` outside designated dependency files.
 3. Collects the changed Lean source plus configured context.
-4. Gives Claude Code or Codex a constrained task to create one generated file.
+4. Gives Claude Code or Codex a constrained task to add one or more Lean files.
 5. Lets the agent run only a credential-scrubbing Lean wrapper.
 6. Confirms that `HEAD` and all tracked files are unchanged.
-7. Rejects unsafe escape hatches in the generated source.
-8. Runs `lake env lean` on the generated file and reruns `lake build`.
-9. Uploads the generated file and diagnostics as `ai-lean-check`.
+7. Discovers untracked project files from Git and rejects non-Lean additions.
+8. Rejects unsafe escape hatches in every generated Lean source.
+9. Runs `lake env lean` on every generated file and reruns `lake build`.
+10. Uploads the generated files and diagnostics as `ai-lean-check`.
 
 ## Claude Code with a GitHub environment
 
@@ -97,7 +97,8 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `imports` | empty | Newline-separated modules the generated file must import |
 | `task` | Generate meaningful compile-time checks | Extra generation instructions |
 | `agent-max-turns` | `20` | Maximum Claude Code turns; ignored by Codex |
-| `output-file` | `.ai-lean-check/GeneratedCheck.lean` | Generated file path |
+| `output-file` | `.ai-lean-check/GeneratedCheck.lean` | Legacy single target used when `target-files` is empty |
+| `target-files` | empty | Newline-separated project files the agent must add; additional untracked Lean files are discovered automatically |
 | `verification-command` | empty | Additional shell verification run after mandatory checks with provider and GitHub credentials removed |
 | `setup-lean` | `"true"` | Run `leanprover/lean-action@v1` |
 | `build-project` | `"true"` | Run the initial `lake build` when Lean setup is enabled |
@@ -163,8 +164,8 @@ only read/edit tools plus that wrapper; Codex uses a workspace-write sandbox
 with sudo disabled. After the agent finishes, an independent verifier rejects
 any tracked-file or commit change.
 
-The optional `verification-command` runs last, after `lake env lean
-<output-file>` and `lake build`. It receives the same scrubbed environment and
+The optional `verification-command` runs last, after each generated file and
+`lake build` pass. It receives the same scrubbed environment and
 cannot reuse the checkout authorization header:
 
 ```yaml
@@ -189,7 +190,9 @@ The job fails when:
 - dependency placeholders violate `deps-sorry-policy`;
 - the agent changes tracked files or `HEAD`;
 - generated code uses a forbidden construct;
-- the generated file or final `lake build` does not compile.
+- the agent adds a non-Lean project file;
+- a requested target file is missing;
+- any generated file or final `lake build` does not compile.
 
 Repository administrators can bypass a required check only if the branch rules
 or ruleset permits bypass. GitHub can be configured to forbid administrator
