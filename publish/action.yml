@@ -1,0 +1,111 @@
+name: Publish Verified Lean Files
+description: Commit independently verified, Git-diff-discovered Lean additions and open a pull request.
+author: eyalk11
+
+inputs:
+  github-token:
+    description: "GitHub token with contents: write and pull-requests: write."
+    required: true
+  generated-files:
+    description: Newline-separated verified Lean files, normally from ai-lean-check's generated-files output.
+    required: true
+  base-branch:
+    description: Branch against which the generated-files pull request is opened.
+    required: true
+  source-pr:
+    description: Optional originating pull request number used in default names.
+    required: false
+    default: ""
+  branch-name:
+    description: Branch to create. Empty selects ai-lean-check/pr-<source-pr>-run-<run-id>.
+    required: false
+    default: ""
+  commit-message:
+    description: Commit message. Empty selects a source-PR-aware default.
+    required: false
+    default: ""
+  title:
+    description: Pull request title. Empty selects a source-PR-aware default.
+    required: false
+    default: ""
+  body:
+    description: Pull request body.
+    required: false
+    default: Generated after independent Lean compilation and a full project build.
+
+outputs:
+  pull-request-url:
+    description: URL of the created pull request.
+    value: ${{ steps.publish.outputs.pull-request-url }}
+  branch:
+    description: Name of the pushed branch.
+    value: ${{ steps.publish.outputs.branch }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate, commit, and open pull request
+      id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_GENERATED_FILES: ${{ inputs.generated-files }}
+        INPUT_BASE_BRANCH: ${{ inputs.base-branch }}
+        INPUT_SOURCE_PR: ${{ inputs.source-pr }}
+        INPUT_BRANCH_NAME: ${{ inputs.branch-name }}
+        INPUT_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_BODY: ${{ inputs.body }}
+      run: |
+        set -euo pipefail
+
+        mapfile -t requested < <(printf '%s\n' "$INPUT_GENERATED_FILES" | sed '/^[[:space:]]*$/d')
+        if [[ "${#requested[@]}" -eq 0 ]]; then
+          echo "::error::generated-files is empty"
+          exit 1
+        fi
+
+        mapfile -t diff_added < <(
+          git diff --name-only --diff-filter=A -- '*.lean' '**/*.lean' | sort -u
+        )
+        for file in "${requested[@]}"; do
+          if [[ "$file" != *.lean || ! -f "$file" ]]; then
+            echo "::error::Refusing missing or non-Lean generated file: $file"
+            exit 1
+          fi
+          if ! printf '%s\n' "${diff_added[@]}" | grep -Fxq -- "$file"; then
+            echo "::error::File is not an added Lean file in git diff: $file"
+            exit 1
+          fi
+        done
+
+        tracked_changes="$(git diff --name-only --diff-filter=CDMRTUXB)"
+        if [[ -n "$tracked_changes" ]]; then
+          echo "::error::Refusing to publish with tracked-file changes"
+          printf '%s\n' "$tracked_changes"
+          exit 1
+        fi
+
+        suffix="${INPUT_SOURCE_PR:-manual}"
+        branch="${INPUT_BRANCH_NAME:-ai-lean-check/pr-${suffix}-run-${GITHUB_RUN_ID}}"
+        commit_message="${INPUT_COMMIT_MESSAGE:-Formalize PR #${suffix} in Lean}"
+        title="${INPUT_TITLE:-Formalize PR #${suffix} in Lean}"
+
+        git switch -c "$branch"
+        git add -- "${requested[@]}"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git commit -m "$commit_message"
+        gh auth setup-git
+        git push --set-upstream origin "$branch"
+        pr_url="$(gh pr create \
+          --repo "$GITHUB_REPOSITORY" \
+          --base "$INPUT_BASE_BRANCH" \
+          --head "$branch" \
+          --title "$title" \
+          --body "$INPUT_BODY")"
+
+        {
+          echo "pull-request-url=$pr_url"
+          echo "branch=$branch"
+        } >> "$GITHUB_OUTPUT"

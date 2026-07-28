@@ -199,6 +199,31 @@ Repository administrators can bypass a required check only if the branch rules
 or ruleset permits bypass. GitHub can be configured to forbid administrator
 bypass.
 
+## Publish verified files
+
+Publishing is a separate action so the coding agent and verifier never receive
+write-capable GitHub credentials:
+
+```yaml
+      - name: Generate and verify
+        id: lean
+        uses: eyalk11/ai-lean-check@main
+        # provider inputs and credential environment omitted
+
+      - name: Publish verified additions
+        if: steps.lean.outcome == 'success'
+        uses: eyalk11/ai-lean-check/publish@main
+        with:
+          github-token: ${{ github.token }}
+          generated-files: ${{ steps.lean.outputs.generated-files }}
+          base-branch: feature-branch
+          source-pr: "123"
+```
+
+The publish action independently confirms that every supplied path exists, is
+an added `.lean` file in Git diff, and that no tracked file was changed. It
+stages only those verified files, pushes a new branch, and opens a pull request.
+
 ## Local checks
 
 ```bash
