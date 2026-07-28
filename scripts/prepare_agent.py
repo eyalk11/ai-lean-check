@@ -112,13 +112,16 @@ unchanged tracked project still builds.
    `.ai-lean-check/run-lean-sanitized.sh build` once before checking additions.
 4. Create meaningful standalone Lean files related specifically to the change.
 5. Include every required import shown below.
-6. Do not use `sorry`, `admit`, new axioms, unsafe declarations, `run_cmd`,
-   `#eval`, `#compile`, initializers, foreign declarations, IO, System/process
-   access, or shell/file/network access from Lean.
+6. Do not use proof placeholders, new axioms, unsafe declarations, command-time
+   evaluation or compilation, initializers, foreign declarations, process APIs,
+   or shell/file/network access from Lean. The verifier scans source text
+   literally, so do not mention forbidden construct names in comments or strings.
 7. Run `.ai-lean-check/run-lean-sanitized.sh check <file>` for every added file.
 8. Fix compiler failures and rerun the specific check.
 9. Run `.ai-lean-check/run-lean-sanitized.sh build` before finishing.
-10. Before finishing, run `git status --short` and confirm that every change is
+10. Run all shell commands in the foreground. Do not request background execution
+    and do not create log or scratch files outside `.ai-lean-check`.
+11. Before finishing, run `git status --short` and confirm that every change is
     an untracked `.lean` file; revert any tracked-file edit yourself.
 
 ## Project task
