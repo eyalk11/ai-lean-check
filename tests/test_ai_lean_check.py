@@ -337,3 +337,73 @@ class AgentPromptPolicyTests(unittest.TestCase):
             prompt = PREPARE_MODULE.build_prompt("base", "head")
         self.assertIn("essential to the mathematics", prompt)
         self.assertIn("not mathematically necessary", prompt)
+
+
+class ClaudeSandboxConfigurationTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def test_action_uses_supported_main_seam(self) -> None:
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("anthropics/claude-code-base-action@main", action)
+        self.assertIn("path_to_claude_code_executable:", action)
+        self.assertIn("claude-bwrap.sh", action)
+        self.assertIn("claude_args:", action)
+        self.assertIn("--setting-sources user", action)
+        self.assertNotIn("claude-code-base-action@beta", action)
+        self.assertNotIn("\n        max_turns:", action)
+        self.assertNotIn("\n        allowed_tools:", action)
+
+    def test_action_blanks_github_actions_credentials(self) -> None:
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        for name in (
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "ACTIONS_RUNTIME_TOKEN",
+            "ACTIONS_CACHE_URL",
+            "ACTIONS_RESULTS_URL",
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+            "ACTIONS_ID_TOKEN_REQUEST_URL",
+        ):
+            self.assertIn(f'{name}: ""', action)
+
+    def test_wrapper_enforces_requested_boundaries(self) -> None:
+        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--unshare-pid", wrapper)
+        self.assertIn("--clearenv", wrapper)
+        self.assertIn('--ro-bind "$workspace/.git" "$workspace/.git"', wrapper)
+        self.assertIn('--tmpfs "$actions_root"', wrapper)
+        self.assertIn('--bind "$workspace" "$workspace"', wrapper)
+        self.assertIn("timeout --foreground --kill-after=10 1800", wrapper)
+
+    def test_root_bind_precedes_proc_and_dev(self) -> None:
+        """The ordering is the isolation.
+
+        bwrap applies mounts in sequence with recursive binds, so a `--ro-bind
+        / /` placed after `--proc` silently replaces the sandbox procfs with the
+        host's and PID hiding stops working. Asserting the flags merely exist
+        cannot see that, so assert their order.
+        """
+        for script in ("claude-bwrap.sh", "setup_claude_sandbox.sh"):
+            with self.subTest(script=script):
+                text = (self.ROOT / "scripts" / script).read_text(encoding="utf-8")
+                root = text.index("--ro-bind / /")
+                self.assertLess(root, text.index("--proc /proc"))
+                self.assertLess(root, text.index("--dev /dev"))
+                self.assertNotIn("--dev-bind /dev /dev", text)
+
+    def test_toolchain_lookup_survives_the_home_redirect(self) -> None:
+        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('--setenv ELAN_HOME "$HOME/.elan"', wrapper)
+        # Paths must derive from the real HOME, not a hardcoded runner account.
+        self.assertNotIn("/home/runner", wrapper)
+
+    def test_preflight_verifies_isolation_not_just_exit_status(self) -> None:
+        setup = (self.ROOT / "scripts" / "setup_claude_sandbox.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("visible_pids", setup)
+        self.assertIn("PID isolation is not in effect", setup)

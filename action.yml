@@ -179,21 +179,35 @@ runs:
         AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
+    - name: Set up Claude Code sandbox
+      if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/setup_claude_sandbox.sh"
+
     - name: Generate and test with Claude Code
       id: claude-agent
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
-      uses: anthropics/claude-code-base-action@beta
+      uses: anthropics/claude-code-base-action@main
       env:
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
+        ACTIONS_RUNTIME_TOKEN: ""
+        ACTIONS_CACHE_URL: ""
+        ACTIONS_RESULTS_URL: ""
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+        ACTIONS_ID_TOKEN_REQUEST_URL: ""
       with:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
         prompt_file: .ai-lean-check/agent-prompt.md
-        model: ${{ inputs.model || 'claude-sonnet-4-6' }}
-        max_turns: ${{ inputs.agent-max-turns }}
-        timeout_minutes: "30"
-        allowed_tools: Read,Glob,Grep,Write,Edit,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+        path_to_claude_code_executable: ${{ github.action_path }}/scripts/claude-bwrap.sh
+        claude_args: >-
+          --model ${{ inputs.model || 'claude-sonnet-4-6' }}
+          --max-turns ${{ inputs.agent-max-turns }}
+          --setting-sources user
+          --allowed-tools
+          Read,Glob,Grep,Write,Edit,Bash(git diff:*),Bash(git status:*),Bash(git
+          log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
 
     - name: Capture Claude diagnostics
       if: always() && inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
