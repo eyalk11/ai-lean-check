@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -301,3 +302,96 @@ class PorcelainParsingTest(unittest.TestCase):
                 modified, rejected = MODULE.classify_tracked_changes(line + "\n")
                 self.assertEqual(modified, ["lean/foo.lean"], msg=repr(line))
                 self.assertEqual(rejected, [], msg=repr(line))
+
+
+STATUSLINE = Path(__file__).parents[1] / "scripts" / "token_budget_statusline.py"
+STATUSLINE_SPEC = importlib.util.spec_from_file_location("token_budget_statusline", STATUSLINE)
+STATUSLINE_MODULE = importlib.util.module_from_spec(STATUSLINE_SPEC)
+assert STATUSLINE_SPEC.loader
+STATUSLINE_SPEC.loader.exec_module(STATUSLINE_MODULE)
+
+PREPARE = Path(__file__).parents[1] / "scripts" / "prepare_agent.py"
+# prepare_agent.py imports its sibling the way the action runs it, with the
+# scripts directory on sys.path.
+sys.path.insert(0, str(PREPARE.parent))
+PREPARE_SPEC = importlib.util.spec_from_file_location("prepare_agent", PREPARE)
+PREPARE_MODULE = importlib.util.module_from_spec(PREPARE_SPEC)
+assert PREPARE_SPEC.loader
+PREPARE_SPEC.loader.exec_module(PREPARE_MODULE)
+
+
+class TokenBudgetTests(unittest.TestCase):
+    def _transcript(self, directory: str) -> str:
+        path = Path(directory) / "transcript.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "message": {
+                        "usage": {
+                            "input_tokens": 100,
+                            "output_tokens": 50,
+                            "cache_creation_input_tokens": 10,
+                            "cache_read_input_tokens": 1000,
+                        }
+                    }
+                }
+            )
+            + "\n"
+            + json.dumps({"message": {"content": "no usage block"}})
+            + "\nnot json at all\n"
+            + json.dumps(
+                {"message": {"usage": {"input_tokens": 200, "output_tokens": 80}}}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
+    def test_usage_is_summed_cumulatively_over_the_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            usage = STATUSLINE_MODULE.sum_usage(self._transcript(directory))
+        self.assertEqual(usage["input"], 300)
+        self.assertEqual(usage["output"], 130)
+        self.assertEqual(usage["cache_write"], 10)
+        self.assertEqual(usage["cache_read"], 1000)
+        self.assertEqual(usage["total"], 1440)
+
+    def test_missing_or_malformed_transcript_yields_zero(self) -> None:
+        self.assertEqual(STATUSLINE_MODULE.sum_usage("")["total"], 0)
+        self.assertEqual(STATUSLINE_MODULE.sum_usage("/nonexistent/x.jsonl")["total"], 0)
+
+    def test_budget_block_is_empty_when_uncapped(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_MAX_TOKENS": "0"}, clear=False):
+            self.assertEqual(PREPARE_MODULE.budget_block(), "")
+        with patch.dict(os.environ, {"AI_LEAN_MAX_TOKENS": "300000"}, clear=False):
+            self.assertIn("300000", PREPARE_MODULE.budget_block())
+
+    def test_invalid_budget_falls_back_to_uncapped(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_MAX_TOKENS": "not-a-number"}, clear=False):
+            self.assertEqual(PREPARE_MODULE.max_tokens(), 0)
+
+    def test_settings_point_the_status_line_at_the_action_script(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            with patch.dict(
+                os.environ,
+                {"AI_LEAN_MAX_TOKENS": "300000", "GITHUB_ACTION_PATH": "/action"},
+                clear=False,
+            ):
+                PREPARE_MODULE.write_token_budget(work)
+            settings = json.loads((work / "claude-settings.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["statusLine"]["type"], "command")
+            self.assertEqual(
+                settings["statusLine"]["command"],
+                "python3 /action/scripts/token_budget_statusline.py",
+            )
+            self.assertEqual(
+                (work / "token-budget.conf").read_text(encoding="utf-8").strip(),
+                "300000",
+            )
+
+    def test_edit_policy_forbids_non_mathematical_fixes(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_EDIT_POLICY": "edit"}, clear=False):
+            prompt = PREPARE_MODULE.build_prompt("base", "head")
+        self.assertIn("essential to the mathematics", prompt)
+        self.assertIn("not mathematically necessary", prompt)

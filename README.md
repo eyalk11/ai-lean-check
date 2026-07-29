@@ -98,6 +98,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `imports` | empty | Newline-separated modules the generated file must import |
 | `task` | Generate meaningful compile-time checks | Extra generation instructions |
 | `agent-max-turns` | `20` | Maximum Claude Code turns; ignored by Codex |
+| `max-tokens` | `300000` | Cumulative token budget (input + output + cache). A status line in the container meters the running total, warns at 80%, and stops the agent at 100%. `0` disables the cap; ignored by Codex |
 | `output-file` | empty | Legacy optional single target; empty lets the agent choose filenames |
 | `target-files` | empty | Optional requested project files; empty lets the agent choose filenames |
 | `verification-command` | empty | Additional shell verification run after mandatory checks with provider and GitHub credentials removed |

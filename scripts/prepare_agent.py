@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -76,6 +77,54 @@ def remove_persisted_github_auth() -> None:
     )
 
 
+def max_tokens() -> int:
+    raw = env("AI_LEAN_MAX_TOKENS", "0").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def write_token_budget(work: Path) -> None:
+    """Install the status line that meters and caps the agent's token use.
+
+    The status line runs inside the container on every update, so it is what
+    sees the budget being spent while there is still a process to stop. The cap
+    is written beside it rather than passed through the environment, which the
+    sanitized Lean wrapper strips.
+    """
+    (work / "token-budget.conf").write_text(f"{max_tokens()}\n", encoding="utf-8")
+    (work / "token-budget.state").unlink(missing_ok=True)
+    script = (
+        Path(env("GITHUB_ACTION_PATH", ".")) / "scripts" / "token_budget_statusline.py"
+    )
+    (work / "claude-settings.json").write_text(
+        json.dumps(
+            {
+                "statusLine": {
+                    "type": "command",
+                    "command": f"python3 {script.as_posix()}",
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def budget_block() -> str:
+    limit = max_tokens()
+    if not limit:
+        return ""
+    return (
+        f"\n## Token budget\n\n"
+        f"This run is capped at {limit} cumulative tokens (input, output and cache\n"
+        "combined). You are warned at 80% and the run is stopped at 100%, so finish\n"
+        "the smallest complete result you can rather than exploring broadly.\n"
+    )
+
+
 def build_prompt(base: str, head: str) -> str:
     legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
     targets = lines(env("AI_LEAN_TARGET_FILES"))
@@ -104,6 +153,13 @@ def build_prompt(base: str, head: str) -> str:
             "that is the right fix. Register every file you add: a module missing from the\n"
             f"library `roots`/`globs` in {mapping_list}, or missing from the root module's\n"
             "imports, cannot be imported and fails with `unknown module prefix`.\n\n"
+            "Prefer adding new files. Edit an existing file only when the edit is\n"
+            "essential to the mathematics -- an actual error in a formulation, a\n"
+            "statement that is ill-typed, a proof that is genuinely broken. Do not fix\n"
+            "anything that is not mathematically necessary: no style, naming,\n"
+            "formatting, comment, import-tidying, refactoring or unrelated cleanup\n"
+            "changes, however obviously correct they look. If you notice such an issue,\n"
+            "mention it in your summary and leave the file alone.\n\n"
             "When you edit an existing declaration, repair the proof, not the statement.\n"
             "Do not add hypotheses, loosen constants, or narrow conclusions to make\n"
             "something go through. If a statement is genuinely false or ill-typed, say so\n"
@@ -173,7 +229,7 @@ Add one or more Lean source files to the project. The requested files are:
 ## Project task
 
 {task}
-
+{budget_block()}
 ## Required imports
 
 ```lean
@@ -193,6 +249,7 @@ def main() -> int:
         print("\n".join(policy_problems), file=sys.stderr)
         return 1
     base, head = resolve_range()
+    write_token_budget(work)
     (work / "agent-prompt.md").write_text(build_prompt(base, head), encoding="utf-8")
     (work / "baseline-head.txt").write_text(
         run(["git", "rev-parse", "HEAD"]).stdout.strip() + "\n",
