@@ -95,6 +95,25 @@ inputs:
     description: Handling of sorry/admit inside designated dependency files. One of warn or reject.
     required: false
     default: warn
+  edit-policy:
+    description: |
+      Whether the coding agent may edit tracked Lean files. One of edit or
+      add-only. Default edit: repairing an existing proof is often the correct
+      fix, and forbidding it forces the agent to bolt on a parallel file.
+      add-only restricts it to additions, but project mapping files stay
+      editable in both modes -- see project-mapping-files.
+    required: false
+    default: edit
+  project-mapping-files:
+    description: |
+      Newline-separated globs the agent may edit even under edit-policy=add-only.
+      A newly added module is unusable until Lake sees it in the library
+      roots/globs and the root module imports it, so these must stay editable.
+      Callers whose root module is not a lakefile should add it, e.g. lean/FEI.lean.
+    required: false
+    default: |
+      lakefile.toml
+      lakefile.lean
   axiom-policy:
     description: |
       Audit of which generated declarations transitively depend on sorryAx.
@@ -155,6 +174,8 @@ runs:
         AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
         AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
         AI_LEAN_AXIOM_POLICY: ${{ inputs.axiom-policy }}
+        AI_LEAN_EDIT_POLICY: ${{ inputs.edit-policy }}
+        AI_LEAN_PROJECT_MAPPING_FILES: ${{ inputs.project-mapping-files }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
@@ -219,6 +240,9 @@ runs:
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_VERIFICATION_COMMAND: ${{ inputs.verification-command }}
         AI_LEAN_AXIOM_POLICY: ${{ inputs.axiom-policy }}
+        AI_LEAN_EDIT_POLICY: ${{ inputs.edit-policy }}
+        AI_LEAN_PROJECT_MAPPING_FILES: ${{ inputs.project-mapping-files }}
+        AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/verify_agent.py"
 
     - name: Upload generated Lean check

@@ -80,6 +80,22 @@ on:
         required: false
         default: warn
         type: string
+      edit-policy:
+        description: |
+          Whether the coding agent may edit tracked Lean files. One of edit or
+          add-only. Project mapping files stay editable in both modes.
+        required: false
+        type: string
+        default: edit
+      project-mapping-files:
+        description: |
+          Newline-separated globs editable even under edit-policy=add-only.
+          Add your root module here, e.g. lean/FEI.lean.
+        required: false
+        type: string
+        default: |
+          lakefile.toml
+          lakefile.lean
       axiom-policy:
         description: |
           Audit of which generated declarations transitively depend on sorryAx.
@@ -210,6 +226,8 @@ jobs:
           deps-sorry-policy: ${{ inputs.deps-sorry-policy }}
           sorry-allowed-files: ${{ inputs.sorry-allowed-files }}
           axiom-policy: ${{ inputs.axiom-policy }}
+          edit-policy: ${{ inputs.edit-policy }}
+          project-mapping-files: ${{ inputs.project-mapping-files }}
           verification-command: ${{ inputs.verification-command }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -81,6 +81,35 @@ def build_prompt(base: str, head: str) -> str:
     targets = lines(env("AI_LEAN_TARGET_FILES"))
     if not targets and legacy_output:
         targets = [Path(legacy_output).as_posix()]
+    edit_policy = os.environ.get("AI_LEAN_EDIT_POLICY", "edit").strip().lower()
+    mapping = [
+        item.strip()
+        for item in os.environ.get(
+            "AI_LEAN_PROJECT_MAPPING_FILES", "lakefile.toml\nlakefile.lean"
+        ).splitlines()
+        if item.strip()
+    ]
+    mapping_list = ", ".join(f"`{item}`" for item in mapping) or "the project mapping files"
+    if edit_policy == "add-only":
+        edit_block = (
+            "**Do not modify or delete tracked `.lean` files.** Add new ones instead.\n"
+            f"You MAY edit the project mapping files ({mapping_list}) and the root\n"
+            "module that imports the library, because a module missing from the library\n"
+            "`roots`/`globs` cannot be imported and will fail with `unknown module\n"
+            "prefix`. Register every file you add."
+        )
+    else:
+        edit_block = (
+            "You may add new `.lean` files and edit existing project `.lean` files where\n"
+            "that is the right fix. Register every file you add: a module missing from the\n"
+            f"library `roots`/`globs` in {mapping_list}, or missing from the root module's\n"
+            "imports, cannot be imported and fails with `unknown module prefix`.\n\n"
+            "When you edit an existing declaration, repair the proof, not the statement.\n"
+            "Do not add hypotheses, loosen constants, or narrow conclusions to make\n"
+            "something go through. If a statement is genuinely false or ill-typed, say so\n"
+            "and leave it failing. Do not delete or rename tracked files."
+        )
+
     target_block = (
         "\n".join(f"- `{target}`" for target in targets)
         if targets
@@ -113,11 +142,7 @@ Add one or more Lean source files to the project. The requested files are:
 
 {target_block}
 
-**Do not modify or delete any tracked file.** Add only new `.lean` files. The
-new files are standalone verification files: do not import them from `FEI.lean`,
-do not add them to `lakefile.toml`, and do not alter any existing module or root.
-The workflow compiles each new file directly; `lake build` only confirms that the
-unchanged tracked project still builds.
+{edit_block}
 
 ## Required process
 

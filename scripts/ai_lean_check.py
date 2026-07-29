@@ -232,9 +232,18 @@ Add one or more Lean source files to the project. The requested files are:
 
 {target_block}
 
-Do not modify or delete tracked project files. You may add the requested files
-and any additional `.lean` files genuinely needed for the formalization. Do not
-create other project files.
+You may add the requested files and any additional `.lean` files genuinely
+needed for the formalization, and you may edit existing project `.lean` files
+where that is the right fix. You may also edit the project mapping files
+(`lakefile.toml` / `lakefile.lean` and the root module that imports the library)
+so a newly added module is actually part of the build -- a module absent from
+the library `roots`/`globs` cannot be imported. Do not delete or rename tracked
+files, and do not create other project files.
+
+When you edit an existing declaration, repair the proof, not the statement. Do
+not add hypotheses, loosen constants, or narrow conclusions to make something go
+through. If a statement is genuinely false or ill-typed, say so and leave it
+failing.
 
 ## Required process
 
@@ -651,6 +660,53 @@ def axiom_findings(filename: str) -> tuple[list[str], str]:
     return findings, f"{filename}: audited {len(names)} declaration(s)\n{output}"
 
 
+DEFAULT_PROJECT_MAPPING = "lakefile.toml\nlakefile.lean\nlakefile.lean.toml"
+
+
+def project_mapping_patterns() -> list[str]:
+    """Files the agent may edit even under the strict add-only policy.
+
+    A newly added module is unusable until the project can see it: Lake needs it
+    in the library `roots`/`globs`, and the root module needs to import it. An
+    agent forbidden from touching those can only ever produce a file that does
+    not build, so these stay editable in every mode.
+    """
+    return lines(env("AI_LEAN_PROJECT_MAPPING_FILES", DEFAULT_PROJECT_MAPPING))
+
+
+def classify_tracked_changes(porcelain: str) -> tuple[list[str], list[str]]:
+    """Split `git status --porcelain` into (modified paths, rejected descriptions)."""
+    policy = env("AI_LEAN_EDIT_POLICY", "edit").strip().lower()
+    mapping = project_mapping_patterns()
+    modified: list[str] = []
+    rejected: list[str] = []
+    for raw in porcelain.splitlines():
+        if not raw.strip():
+            continue
+        code, _, rest = raw.partition(" ")
+        code = raw[:2]
+        path = raw[3:].strip()
+        if " -> " in path:  # rename
+            rejected.append(f"{path}: renames are not allowed")
+            continue
+        if "D" in code:
+            rejected.append(f"{path}: deletion of a tracked file is not allowed")
+            continue
+        is_mapping = path_allowed(path, mapping)
+        is_lean = path.lower().endswith(".lean")
+        if is_mapping or (policy == "edit" and is_lean):
+            modified.append(path)
+        elif is_lean:
+            rejected.append(
+                f"{path}: editing tracked Lean files is disabled (edit-policy=add-only)"
+            )
+        else:
+            rejected.append(
+                f"{path}: only Lean files and declared project mapping files may be edited"
+            )
+    return modified, rejected
+
+
 def validate(code: str) -> list[str]:
     problems: list[str] = []
     for pattern, label in FORBIDDEN.items():
@@ -660,6 +716,28 @@ def validate(code: str) -> list[str]:
     for module in required:
         if not re.search(rf"(?m)^\s*import\s+{re.escape(module)}\s*$", code):
             problems.append(f"missing required import: {module}")
+    return problems
+
+
+def validate_for(filename: str, code: str, *, added: bool) -> list[str]:
+    """Validation appropriate to the file's role.
+
+    The required-import list describes the agent's own new check files, so it is
+    not imposed on pre-existing project files it edits. Dependency files are
+    exempted from the sorry/admit constructs, which the repository-wide sorry
+    policy governs instead.
+    """
+    problems = validate(code) if added else []
+    if not added:
+        for pattern, label in FORBIDDEN.items():
+            if re.search(pattern, code, flags=re.IGNORECASE):
+                problems.append(f"forbidden construct: {label}")
+    if path_allowed(filename, lines(env("AI_LEAN_SORRY_ALLOWED_FILES", "**/*_deps.lean"))):
+        problems = [
+            problem
+            for problem in problems
+            if not problem.endswith(("construct: sorry", "construct: admit"))
+        ]
     return problems
 
 
@@ -791,10 +869,20 @@ def verify_agent_result() -> int:
         ["git", "status", "--porcelain", "--untracked-files=no"],
         check=False,
     ).stdout.strip()
-    if not baseline_head or current_head != baseline_head or changed:
+    if not baseline_head or current_head != baseline_head:
         diagnostics = (
-            "Coding agent altered tracked repository state; refusing result.\n"
-            f"baseline_head={baseline_head}\ncurrent_head={current_head}\n{changed}\n"
+            "Coding agent moved HEAD; refusing result.\n"
+            f"baseline_head={baseline_head}\ncurrent_head={current_head}\n"
+        )
+        diagnostics_path.write_text(diagnostics, encoding="utf-8")
+        print(diagnostics, file=sys.stderr)
+        return 1
+    modified, rejected_changes = classify_tracked_changes(changed)
+    if rejected_changes:
+        diagnostics = (
+            "Coding agent made disallowed changes to tracked files; refusing result.\n"
+            + "\n".join(rejected_changes)
+            + "\n"
         )
         diagnostics_path.write_text(diagnostics, encoding="utf-8")
         print(diagnostics, file=sys.stderr)
@@ -826,16 +914,28 @@ def verify_agent_result() -> int:
     problems: list[str] = []
     if non_lean:
         problems.append("agent added non-Lean project files: " + ", ".join(non_lean))
-    if not generated:
-        problems.append("coding agent added no untracked Lean files")
+    if not generated and not [n for n in modified if n.lower().endswith(".lean")]:
+        problems.append("coding agent neither added nor edited any Lean file")
     unsafe_paths = [filename for filename in generated if not safe_generated_path(filename)]
     if unsafe_paths:
         problems.append("unsafe generated Lean paths: " + ", ".join(unsafe_paths))
     if missing_targets:
         problems.append("missing requested Lean files: " + ", ".join(missing_targets))
+    modified_lean = sorted(
+        name for name in modified if name.lower().endswith(".lean")
+    )
     for filename in generated:
         code = Path(filename).read_text(encoding="utf-8")
-        problems.extend(f"{filename}: {problem}" for problem in validate(code))
+        problems.extend(
+            f"{filename}: {problem}"
+            for problem in validate_for(filename, code, added=True)
+        )
+    for filename in modified_lean:
+        code = Path(filename).read_text(encoding="utf-8")
+        problems.extend(
+            f"{filename}: {problem}"
+            for problem in validate_for(filename, code, added=False)
+        )
     requested, rejected = declared_check_files(generated)
     if rejected:
         problems.append(
@@ -853,7 +953,10 @@ def verify_agent_result() -> int:
     # An agent that splits its work across importing files can name the entry
     # points rather than have every file compiled separately. The project build
     # command runs either way, so it stays the default verification.
-    commands = [["lake", "env", "lean", filename] for filename in requested or generated]
+    compile_targets = list(requested or generated) + [
+        name for name in modified_lean if name not in (requested or generated)
+    ]
+    commands = [["lake", "env", "lean", filename] for filename in compile_targets]
     commands.append(["lake", "build"])
     for command in commands:
         result = run(
@@ -894,7 +997,7 @@ def verify_agent_result() -> int:
     elif succeeded and axiom_policy != "off":
         audit_problems: list[str] = []
         audit_reports: list[str] = []
-        for filename in requested or generated:
+        for filename in compile_targets:
             found, report = axiom_findings(filename)
             audit_problems.extend(found)
             audit_reports.append(report)
@@ -910,8 +1013,9 @@ def verify_agent_result() -> int:
         "\n\n".join(log_sections) + "\n",
         encoding="utf-8",
     )
-    set_output("generated-file", generated[0])
+    set_output("generated-file", generated[0] if generated else "")
     set_multiline_output("generated-files", "\n".join(generated))
+    set_multiline_output("modified-files", "\n".join(modified))
     set_output("attempts", "1")
     log = diagnostics_path.read_text(encoding="utf-8")
     print(log, file=sys.stdout if succeeded else sys.stderr)

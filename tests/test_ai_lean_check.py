@@ -248,3 +248,40 @@ class LeanDeclarationsTest(unittest.TestCase):
             "end Outer\n"
         )
         self.assertEqual(MODULE.lean_declarations(source), ["Outer.here"])
+
+
+class EditPolicyTest(unittest.TestCase):
+    PORCELAIN = (
+        " M lean/foo.lean\n"
+        " M lakefile.toml\n"
+        " M README.md\n"
+        " D lean/gone.lean\n"
+    )
+
+    def test_edit_mode_allows_lean_and_mapping(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_EDIT_POLICY": "edit"}, clear=False):
+            modified, rejected = MODULE.classify_tracked_changes(self.PORCELAIN)
+        self.assertEqual(modified, ["lean/foo.lean", "lakefile.toml"])
+        self.assertTrue(any("README.md" in r for r in rejected))
+        self.assertTrue(any("deletion" in r for r in rejected))
+
+    def test_add_only_still_allows_project_mapping(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_EDIT_POLICY": "add-only"}, clear=False):
+            modified, rejected = MODULE.classify_tracked_changes(self.PORCELAIN)
+        self.assertEqual(modified, ["lakefile.toml"])
+        self.assertTrue(any("lean/foo.lean" in r and "add-only" in r for r in rejected))
+
+    def test_renames_rejected(self) -> None:
+        with patch.dict(os.environ, {"AI_LEAN_EDIT_POLICY": "edit"}, clear=False):
+            modified, rejected = MODULE.classify_tracked_changes("R  a.lean -> b.lean\n")
+        self.assertEqual(modified, [])
+        self.assertTrue(any("rename" in r for r in rejected))
+
+    def test_extra_mapping_glob_is_honoured(self) -> None:
+        env = {
+            "AI_LEAN_EDIT_POLICY": "add-only",
+            "AI_LEAN_PROJECT_MAPPING_FILES": "lakefile.toml\nlean/FEI.lean",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            modified, _ = MODULE.classify_tracked_changes(" M lean/FEI.lean\n")
+        self.assertEqual(modified, ["lean/FEI.lean"])
