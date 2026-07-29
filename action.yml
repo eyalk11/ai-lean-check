@@ -91,14 +91,6 @@ inputs:
     description: Maximum output tokens requested from the provider per attempt.
     required: false
     default: "32768"
-  max-tokens:
-    description: |
-      Cumulative token budget for the coding agent, counting input, output and
-      cache traffic. A status line inside the container meters the running
-      total, warns at 80%, and stops the agent at 100%. Zero disables the cap.
-      Applies to claude-code only; Codex has no status line.
-    required: false
-    default: "300000"
   deps-sorry-policy:
     description: Handling of sorry/admit inside designated dependency files. One of warn or reject.
     required: false
@@ -184,8 +176,7 @@ runs:
         AI_LEAN_AXIOM_POLICY: ${{ inputs.axiom-policy }}
         AI_LEAN_EDIT_POLICY: ${{ inputs.edit-policy }}
         AI_LEAN_PROJECT_MAPPING_FILES: ${{ inputs.project-mapping-files }}
-        AI_LEAN_MAX_TOKENS: ${{ inputs.max-tokens }}
-        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
@@ -199,7 +190,6 @@ runs:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
         prompt_file: .ai-lean-check/agent-prompt.md
-        settings: .ai-lean-check/claude-settings.json
         model: ${{ inputs.model || 'claude-sonnet-4-6' }}
         max_turns: ${{ inputs.agent-max-turns }}
         timeout_minutes: "30"
@@ -270,7 +260,6 @@ runs:
           .ai-lean-check/codex-final.txt
           .ai-lean-check/check-files.txt
           .ai-lean-check/run-lean-sanitized.sh
-          .ai-lean-check/token-usage.json
         if-no-files-found: warn
         include-hidden-files: true
 

@@ -75,13 +75,6 @@ on:
         required: false
         default: "20"
         type: string
-      max-tokens:
-        description: |
-          Cumulative token budget (input, output and cache) for the coding
-          agent. Warns at 80%, stops the agent at 100%. Zero disables the cap.
-        required: false
-        default: "300000"
-        type: string
       deps-sorry-policy:
         description: warn or reject inside designated dependency files.
         required: false
@@ -230,7 +223,6 @@ jobs:
           task: ${{ inputs.task }}
           max-input-tokens: ${{ inputs.max-input-tokens }}
           agent-max-turns: ${{ inputs.agent-max-turns }}
-          max-tokens: ${{ inputs.max-tokens }}
           deps-sorry-policy: ${{ inputs.deps-sorry-policy }}
           sorry-allowed-files: ${{ inputs.sorry-allowed-files }}
           axiom-policy: ${{ inputs.axiom-policy }}

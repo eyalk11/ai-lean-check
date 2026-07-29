@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -77,51 +76,29 @@ def remove_persisted_github_auth() -> None:
     )
 
 
-def max_tokens() -> int:
-    raw = env("AI_LEAN_MAX_TOKENS", "0").strip()
+def max_turns() -> int:
+    raw = env("AI_LEAN_AGENT_MAX_TURNS", "0").strip()
     try:
         return max(0, int(raw))
     except ValueError:
         return 0
 
 
-def write_token_budget(work: Path) -> None:
-    """Install the status line that meters and caps the agent's token use.
+def turns_block() -> str:
+    """Tell the agent the turn limit it is actually running under.
 
-    The status line runs inside the container on every update, so it is what
-    sees the budget being spent while there is still a process to stop. The cap
-    is written beside it rather than passed through the environment, which the
-    sanitized Lean wrapper strips.
+    Claude Code stops the run at this limit whether or not the work is
+    finished, so an agent that does not know the number cannot budget for it.
     """
-    (work / "token-budget.conf").write_text(f"{max_tokens()}\n", encoding="utf-8")
-    (work / "token-budget.state").unlink(missing_ok=True)
-    script = (
-        Path(env("GITHUB_ACTION_PATH", ".")) / "scripts" / "token_budget_statusline.py"
-    )
-    (work / "claude-settings.json").write_text(
-        json.dumps(
-            {
-                "statusLine": {
-                    "type": "command",
-                    "command": f"python3 {script.as_posix()}",
-                }
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-
-def budget_block() -> str:
-    limit = max_tokens()
+    limit = max_turns()
     if not limit:
         return ""
     return (
-        f"\n## Token budget\n\n"
-        f"This run is capped at {limit} cumulative tokens (input, output and cache\n"
-        "combined). You are warned at 80% and the run is stopped at 100%, so finish\n"
-        "the smallest complete result you can rather than exploring broadly.\n"
+        f"\n## Turn limit\n\n"
+        f"You have {limit} turns. The run is stopped when they are used up, "
+        "finished or not,\nso spend them on the smallest complete result rather "
+        "than on broad exploration.\nA compiling file that covers less is worth "
+        "more than an unfinished larger one.\n"
     )
 
 
@@ -229,7 +206,7 @@ Add one or more Lean source files to the project. The requested files are:
 ## Project task
 
 {task}
-{budget_block()}
+{turns_block()}
 ## Required imports
 
 ```lean
@@ -249,7 +226,6 @@ def main() -> int:
         print("\n".join(policy_problems), file=sys.stderr)
         return 1
     base, head = resolve_range()
-    write_token_budget(work)
     (work / "agent-prompt.md").write_text(build_prompt(base, head), encoding="utf-8")
     (work / "baseline-head.txt").write_text(
         run(["git", "rev-parse", "HEAD"]).stdout.strip() + "\n",
