@@ -213,3 +213,38 @@ example : True := by
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeanDeclarationsTest(unittest.TestCase):
+    def test_tracks_namespaces_and_sections(self) -> None:
+        source = (
+            "namespace FEI.Bd\n"
+            "theorem alpha (x : Nat) : x = x := rfl\n"
+            "section\n"
+            "lemma beta : True := trivial\n"
+            "end\n"
+            "end FEI.Bd\n"
+            "theorem gamma : True := trivial\n"
+        )
+        self.assertEqual(
+            MODULE.lean_declarations(source),
+            ["FEI.Bd.alpha", "FEI.Bd.beta", "gamma"],
+        )
+
+    def test_ignores_comments_and_defs(self) -> None:
+        source = (
+            "/-- theorem ghost : False := by sorry -/\n"
+            "def helper : Nat := 0\n"
+            "protected theorem real : True := trivial\n"
+        )
+        self.assertEqual(MODULE.lean_declarations(source), ["real"])
+
+    def test_named_end_pops_to_matching_opener(self) -> None:
+        source = (
+            "namespace Outer\n"
+            "namespace Inner\n"
+            "end Inner\n"
+            "theorem here : True := trivial\n"
+            "end Outer\n"
+        )
+        self.assertEqual(MODULE.lean_declarations(source), ["Outer.here"])

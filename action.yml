@@ -95,6 +95,14 @@ inputs:
     description: Handling of sorry/admit inside designated dependency files. One of warn or reject.
     required: false
     default: warn
+  axiom-policy:
+    description: |
+      Audit of which generated declarations transitively depend on sorryAx.
+      One of warn, reject or off. The sorry-allowed-files policy is file-based
+      and cannot see that a policy-clean theorem imports a sorry-carrying lemma;
+      this asks Lean instead, at declaration granularity.
+    required: false
+    default: warn
   sorry-allowed-files:
     description: Newline-separated dependency file globs where baseline assumptions may use sorry/admit.
     required: false
@@ -146,6 +154,7 @@ runs:
         AI_LEAN_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         AI_LEAN_DEPS_SORRY_POLICY: ${{ inputs.deps-sorry-policy }}
         AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
+        AI_LEAN_AXIOM_POLICY: ${{ inputs.axiom-policy }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/prepare_agent.py"
 
     - name: Generate and test with Claude Code
@@ -209,6 +218,7 @@ runs:
         AI_LEAN_TARGET_FILES: ${{ inputs.target-files }}
         AI_LEAN_IMPORTS: ${{ inputs.imports }}
         AI_LEAN_VERIFICATION_COMMAND: ${{ inputs.verification-command }}
+        AI_LEAN_AXIOM_POLICY: ${{ inputs.axiom-policy }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/verify_agent.py"
 
     - name: Upload generated Lean check

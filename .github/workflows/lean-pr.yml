@@ -80,6 +80,13 @@ on:
         required: false
         default: warn
         type: string
+      axiom-policy:
+        description: |
+          Audit of which generated declarations transitively depend on sorryAx.
+          One of warn, reject or off.
+        required: false
+        type: string
+        default: warn
       sorry-allowed-files:
         description: Newline-separated dependency file globs.
         required: false
@@ -160,13 +167,30 @@ jobs:
           lint: false
           use-mathlib-cache: ${{ inputs.use-mathlib-cache }}
 
+      # Setup prepares the toolchain and cache; it must not decide whether the
+      # coding agent runs. A caller whose setup-command includes `lake build`
+      # would otherwise gate the agent on the project already compiling, so a
+      # pull request with broken Lean -- exactly the case the agent exists for --
+      # could never reach it. Failures are recorded and handed to the agent as
+      # diagnostics instead.
       - name: Run project-specific Lean setup
+        id: project-setup
+        continue-on-error: true
         env:
           SETUP_COMMAND: ${{ inputs.setup-command }}
         shell: bash
         run: |
-          set -euo pipefail
-          bash --noprofile --norc -euo pipefail -c "$SETUP_COMMAND"
+          set -uo pipefail
+          mkdir -p .ai-lean-check
+          if bash --noprofile --norc -uo pipefail -c "$SETUP_COMMAND" \
+               > .ai-lean-check/setup-log.txt 2>&1; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            code=$?
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            echo "::warning::project setup exited ${code}; continuing so the coding agent still runs"
+          fi
+          tail -c 20000 .ai-lean-check/setup-log.txt || true
 
       - name: Generate and independently verify Lean files
         uses: eyalk11/ai-lean-check@main
@@ -185,6 +209,7 @@ jobs:
           agent-max-turns: ${{ inputs.agent-max-turns }}
           deps-sorry-policy: ${{ inputs.deps-sorry-policy }}
           sorry-allowed-files: ${{ inputs.sorry-allowed-files }}
+          axiom-policy: ${{ inputs.axiom-policy }}
           verification-command: ${{ inputs.verification-command }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

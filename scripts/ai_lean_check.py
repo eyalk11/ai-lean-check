@@ -191,6 +191,29 @@ Additional project context:
 Generate one complete Lean file now."""
 
 
+def setup_diagnostics() -> str:
+    """Output of the caller's project setup, when it failed.
+
+    Setup is deliberately non-fatal so that the coding agent always runs; a
+    project that does not currently build is the case the agent is most needed
+    for, and the build output is the most useful context it can be given.
+    """
+    log = Path(".ai-lean-check/setup-log.txt")
+    if not log.is_file():
+        return ""
+    text = log.read_text(encoding="utf-8", errors="ignore").strip()
+    if not text:
+        return ""
+    tail = text[-8000:]
+    return (
+        "\n\n## Project setup output\n\n"
+        "The project setup step ran before you and its output is below. If it\n"
+        "reports build errors, the project does not currently compile. Take that\n"
+        "into account: your own files must compile against the project as it is.\n\n"
+        f"```\n{tail}\n```\n"
+    )
+
+
 def build_agent_prompt(diff: str, context: str) -> str:
     legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
     targets = lines(env("AI_LEAN_TARGET_FILES"))
@@ -230,7 +253,7 @@ create other project files.
 ## Project task
 
 {env("AI_LEAN_TASK", "Generate meaningful checks for the changed Lean declarations.")}
-
+{setup_diagnostics()}
 ## Required imports
 
 ```lean
@@ -541,6 +564,93 @@ def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
     return fatal_findings
 
 
+DECLARATION_RE = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)*"
+    r"(?:private\s+|protected\s+|noncomputable\s+|nonrec\s+)*"
+    r"(?:theorem|lemma)\s+([A-Za-z_\u00C0-\uFFFF][^\s:({\[]*)"
+)
+
+
+def lean_declarations(source: str) -> list[str]:
+    """Fully qualified theorem/lemma names declared in `source`.
+
+    Namespace and section openers are tracked so that the names are the ones
+    `#print axioms` will accept. Only propositions are collected: they are what
+    an unsound assumption would silently contaminate.
+    """
+    code = lean_code_without_comments_or_strings(source)
+    stack: list[tuple[str, str]] = []
+    names: list[str] = []
+    for raw in code.splitlines():
+        line = raw.strip()
+        opener = re.match(r"^(namespace|section)\s+([A-Za-z_][\w.\u00C0-\uFFFF]*)", line)
+        if opener:
+            stack.append((opener.group(1), opener.group(2)))
+            continue
+        if re.match(r"^section\s*$", line):
+            stack.append(("section", ""))
+            continue
+        closer = re.match(r"^end(?:\s+([A-Za-z_][\w.\u00C0-\uFFFF]*))?\s*$", line)
+        if closer:
+            wanted = closer.group(1)
+            if wanted:
+                for index in range(len(stack) - 1, -1, -1):
+                    if stack[index][1] == wanted:
+                        del stack[index:]
+                        break
+            elif stack:
+                stack.pop()
+            continue
+        found = DECLARATION_RE.match(line)
+        if found:
+            prefix = ".".join(name for kind, name in stack if kind == "namespace" and name)
+            names.append(f"{prefix}.{found.group(1)}" if prefix else found.group(1))
+    return names
+
+
+def axiom_findings(filename: str) -> tuple[list[str], str]:
+    """Report which declarations of `filename` transitively depend on `sorryAx`.
+
+    The file-glob `sorry` policy answers "does this file contain the token", which
+    is not the question that matters: a theorem in a policy-clean file is not
+    proved if it imports a `sorry`-carrying lemma from a dependency file. This
+    asks Lean instead, so the granularity is the declaration rather than the file.
+    """
+    path = Path(filename)
+    source = path.read_text(encoding="utf-8", errors="ignore")
+    names = lean_declarations(source)
+    if not names:
+        return [], f"{filename}: no theorem or lemma declarations to audit"
+    probe = path.with_name(f"{path.stem}__axiomcheck.lean")
+    body = source.rstrip("\n") + "\n\n" + "\n".join(f"#print axioms {name}" for name in names) + "\n"
+    try:
+        probe.write_text(body, encoding="utf-8")
+        result = run(
+            ["lake", "env", "lean", str(probe)],
+            check=False,
+            process_env=sanitized_process_env(),
+        )
+        output = "\n".join(
+            part for part in (result.stdout.strip(), result.stderr.strip()) if part
+        )
+    finally:
+        probe.unlink(missing_ok=True)
+    if result.returncode != 0:
+        return (
+            [f"{filename}: could not audit axioms (probe exited {result.returncode})"],
+            f"{filename}: axiom audit failed\n{output}",
+        )
+    tainted = [
+        line.strip()
+        for line in output.splitlines()
+        if "sorryAx" in line
+    ]
+    findings = [
+        f"{filename}: declaration depends on sorryAx -- {line}" for line in tainted
+    ]
+    return findings, f"{filename}: audited {len(names)} declaration(s)\n{output}"
+
+
 def validate(code: str) -> list[str]:
     problems: list[str] = []
     for pattern, label in FORBIDDEN.items():
@@ -777,6 +887,25 @@ def verify_agent_result() -> int:
         ]
         log_sections.append("\n".join(part for part in section if part))
         succeeded = result.returncode == 0
+    axiom_policy = env("AI_LEAN_AXIOM_POLICY", "warn").strip().lower()
+    if axiom_policy not in {"warn", "reject", "off"}:
+        log_sections.append(f"invalid axiom policy: {axiom_policy}")
+        succeeded = False
+    elif succeeded and axiom_policy != "off":
+        audit_problems: list[str] = []
+        audit_reports: list[str] = []
+        for filename in requested or generated:
+            found, report = axiom_findings(filename)
+            audit_problems.extend(found)
+            audit_reports.append(report)
+        log_sections.append("$ axiom audit\n" + "\n\n".join(audit_reports))
+        for problem in audit_problems:
+            print(f"::{'error' if axiom_policy == 'reject' else 'warning'}::{problem}")
+        if audit_problems and axiom_policy == "reject":
+            log_sections.append(
+                "axiom audit rejected:\n" + "\n".join(audit_problems)
+            )
+            succeeded = False
     diagnostics_path.write_text(
         "\n\n".join(log_sections) + "\n",
         encoding="utf-8",
