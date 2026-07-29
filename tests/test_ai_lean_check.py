@@ -285,3 +285,19 @@ class EditPolicyTest(unittest.TestCase):
         with patch.dict(os.environ, env, clear=False):
             modified, _ = MODULE.classify_tracked_changes(" M lean/FEI.lean\n")
         self.assertEqual(modified, ["lean/FEI.lean"])
+
+
+class PorcelainParsingTest(unittest.TestCase):
+    def test_all_status_paddings_keep_the_full_path(self) -> None:
+        cases = [
+            " M lean/foo.lean",   # modified, unstaged
+            "M  lean/foo.lean",   # modified, staged
+            "MM lean/foo.lean",   # staged and modified again
+            "A  lean/foo.lean",   # added and staged
+            " M  lean/foo.lean",  # extra padding
+        ]
+        with patch.dict(os.environ, {"AI_LEAN_EDIT_POLICY": "edit"}, clear=False):
+            for line in cases:
+                modified, rejected = MODULE.classify_tracked_changes(line + "\n")
+                self.assertEqual(modified, ["lean/foo.lean"], msg=repr(line))
+                self.assertEqual(rejected, [], msg=repr(line))

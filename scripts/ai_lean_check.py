@@ -683,9 +683,12 @@ def classify_tracked_changes(porcelain: str) -> tuple[list[str], list[str]]:
     for raw in porcelain.splitlines():
         if not raw.strip():
             continue
-        code, _, rest = raw.partition(" ")
+        # Porcelain v1 is exactly two status characters, then whitespace, then the
+        # path. Slicing at a fixed offset of 3 loses the first character of the
+        # path whenever git pads differently (staged vs unstaged vs both), which
+        # produced 'ean/...' from ' M lean/...' in the wild.
         code = raw[:2]
-        path = raw[3:].strip()
+        path = raw[2:].strip()
         if " -> " in path:  # rename
             rejected.append(f"{path}: renames are not allowed")
             continue
