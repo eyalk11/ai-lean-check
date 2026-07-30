@@ -375,7 +375,26 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
         self.assertIn('--ro-bind "$workspace/.git" "$workspace/.git"', wrapper)
         self.assertIn('--tmpfs "$actions_root"', wrapper)
         self.assertIn('--bind "$workspace" "$workspace"', wrapper)
-        self.assertIn("timeout --foreground --kill-after=10 1800", wrapper)
+        self.assertIn('timeout --foreground --kill-after=10 "$timeout_seconds"', wrapper)
+
+    def test_sandbox_timeout_scales_with_the_turn_budget(self) -> None:
+        """A fixed timeout would silently cap a raised agent-max-turns.
+
+        At the observed rate of well under a minute per turn, a hardcoded 30
+        minutes hard-kills a 120-turn run around turn 47 instead of letting
+        max_turns end it cleanly.
+        """
+        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("AI_LEAN_AGENT_MAX_TURNS", wrapper)
+        self.assertIn("timeout_seconds=$(( turns * 60 ))", wrapper)
+        self.assertIn("timeout_seconds < 1800", wrapper)
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        # The wrapper can only scale if the agent step actually exports it.
+        self.assertIn(
+            "AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}", action
+        )
 
     def test_root_bind_precedes_proc_and_dev(self) -> None:
         """The ordering is the isolation.

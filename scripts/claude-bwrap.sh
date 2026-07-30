@@ -84,7 +84,15 @@ pass_if_set LANG
 pass_if_set LC_ALL
 pass_if_set TERM
 
-# Preserve the former base-action timeout while ensuring the whole sandbox is
-# torn down if Claude or one of its children does not exit.
-exec timeout --foreground --kill-after=10 1800 \
+# Tear the whole sandbox down if Claude or one of its children does not exit.
+# The budget scales with the turn limit so that raising agent-max-turns is not
+# silently capped: observed runs average well under a minute per turn, and a
+# fixed 30 minutes would hard-kill a 120-turn run around turn 47 rather than
+# letting max_turns end it cleanly. The floor keeps short runs generous.
+turns="${AI_LEAN_AGENT_MAX_TURNS:-0}"
+[[ "$turns" =~ ^[0-9]+$ ]] || turns=0
+timeout_seconds=$(( turns * 60 ))
+(( timeout_seconds < 1800 )) && timeout_seconds=1800
+
+exec timeout --foreground --kill-after=10 "$timeout_seconds" \
   bwrap "${bwrap_args[@]}" "$real_claude" "$@"

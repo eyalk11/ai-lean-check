@@ -189,6 +189,9 @@ runs:
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
       uses: anthropics/claude-code-base-action@main
       env:
+        # Read by claude-bwrap.sh to scale the sandbox timeout with the turn
+        # budget. Not passed into the sandbox itself; --clearenv drops it.
+        AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
         ACTIONS_RUNTIME_TOKEN: ""
