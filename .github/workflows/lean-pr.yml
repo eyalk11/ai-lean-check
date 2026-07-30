@@ -252,10 +252,29 @@ jobs:
           name: ai-lean-check-${{ github.run_id }}
           path: .
       - uses: eyalk11/ai-lean-check/publish@main
+        id: publish
         with:
           github-token: ${{ github.token }}
           base-branch: ${{ needs.inspect.outputs.head_branch }}
           source-pr: ${{ needs.inspect.outputs.pr_number }}
+
+      # The generated pull request targets the source branch, so without a
+      # pointer from the source pull request it is easy to miss entirely.
+      - name: Link the generated pull request from the source pull request
+        if: steps.publish.outputs.pull-request-url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.inspect.outputs.pr_number }}
+          GENERATED_PR: ${{ steps.publish.outputs.pull-request-url }}
+          GENERATED_BRANCH: ${{ steps.publish.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(printf '%s\n\n%s\n\n%s\n' \
+            "The automatic AI Lean compiler worked on this branch and its output compiled." \
+            "This is $GENERATED_PR (branch \`$GENERATED_BRANCH\`). It targets this pull request's branch, so merging it brings the formalisation here." \
+            "Independently verified after the agent finished: \`lake env lean\` on each generated file, then \`lake build\`. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
 
   report-failure:
     needs: [inspect, generate]

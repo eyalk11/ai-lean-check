@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+
+import yaml
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "ai_lean_check.py"
@@ -428,82 +430,142 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
         self.assertIn("PID isolation is not in effect", setup)
 
 
-STATUSLINE = Path(__file__).parents[1] / "scripts" / "token_usage_statusline.py"
-STATUSLINE_SPEC = importlib.util.spec_from_file_location(
-    "token_usage_statusline", STATUSLINE
-)
-STATUSLINE_MODULE = importlib.util.module_from_spec(STATUSLINE_SPEC)
-assert STATUSLINE_SPEC.loader
-STATUSLINE_SPEC.loader.exec_module(STATUSLINE_MODULE)
+REPORT = Path(__file__).parents[1] / "scripts" / "token_usage_report.py"
+REPORT_SPEC = importlib.util.spec_from_file_location("token_usage_report", REPORT)
+REPORT_MODULE = importlib.util.module_from_spec(REPORT_SPEC)
+assert REPORT_SPEC.loader
+REPORT_SPEC.loader.exec_module(REPORT_MODULE)
 
 
-class TokenUsageStatusLineTests(unittest.TestCase):
+class TokenUsageReportTests(unittest.TestCase):
     ROOT = Path(__file__).parents[1]
 
-    def _transcript(self, directory: str) -> str:
-        path = Path(directory) / "transcript.jsonl"
-        path.write_text(
-            json.dumps(
-                {
-                    "message": {
-                        "usage": {
-                            "input_tokens": 100,
-                            "output_tokens": 50,
-                            "cache_creation_input_tokens": 10,
-                            "cache_read_input_tokens": 1000,
-                        }
-                    }
-                }
-            )
-            + "\n"
-            + json.dumps({"message": {"content": "no usage block"}})
-            + "\nnot json at all\n"
-            + json.dumps(
-                {"message": {"usage": {"input_tokens": 200, "output_tokens": 80}}}
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        return str(path)
+    def _log(self, directory: str, *, model_usage: bool = True) -> Path:
+        result = {
+            "type": "result",
+            "num_turns": 7,
+            "total_cost_usd": 1.25,
+            "usage": {
+                "input_tokens": 11,
+                "output_tokens": 2200,
+                "cache_creation_input_tokens": 300,
+                "cache_read_input_tokens": 40000,
+            },
+        }
+        if model_usage:
+            result["modelUsage"] = {
+                "claude-sonnet-4-6": {
+                    "inputTokens": 10,
+                    "outputTokens": 2000,
+                    "cacheCreationInputTokens": 300,
+                    "cacheReadInputTokens": 40000,
+                    "costUSD": 1.2,
+                },
+                "claude-haiku-4-5": {
+                    "inputTokens": 5,
+                    "outputTokens": 20,
+                    "cacheCreationInputTokens": 0,
+                    "cacheReadInputTokens": 0,
+                    "costUSD": 0.05,
+                },
+            }
+        events = [
+            # Partial streaming counts: deliberately far below the real totals,
+            # and with cache reads repeated, which is what made summing wrong.
+            {"type": "assistant", "message": {"usage": {"output_tokens": 8, "cache_read_input_tokens": 40000}}},
+            {"type": "assistant", "message": {"usage": {"output_tokens": 12, "cache_read_input_tokens": 40000}}},
+            result,
+        ]
+        path = Path(directory) / "claude-execution.json"
+        path.write_text(json.dumps(events), encoding="utf-8")
+        return path
 
-    def test_usage_is_summed_cumulatively(self) -> None:
+    def test_model_usage_is_preferred_over_summing_events(self) -> None:
+        """Summing per-event usage undercounts output and doubles cache reads.
+
+        The per-assistant-event blocks carry partial streaming counts and repeat
+        their cache reads, so on a real run output came out ~45x low. modelUsage
+        is authoritative: its per-model costUSD sums to total_cost_usd.
+        """
         with tempfile.TemporaryDirectory() as directory:
-            usage = STATUSLINE_MODULE.sum_usage(self._transcript(directory))
-        self.assertEqual(usage["input"], 300)
-        self.assertEqual(usage["output"], 130)
-        self.assertEqual(usage["cache_write"], 10)
-        self.assertEqual(usage["cache_read"], 1000)
-        self.assertEqual(usage["total"], 1440)
+            usage = REPORT_MODULE.summarise(self._log(directory))
+        self.assertEqual(usage["output"], 2020)
+        self.assertEqual(usage["cache_read"], 40000)
+        self.assertEqual(usage["input"], 15)
+        self.assertEqual(usage["total"], 42335)
+        self.assertNotEqual(usage["output"], 20)
 
-    def test_missing_or_malformed_transcript_yields_zero(self) -> None:
-        self.assertEqual(STATUSLINE_MODULE.sum_usage("")["total"], 0)
+    def test_per_model_costs_are_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            usage = REPORT_MODULE.summarise(self._log(directory))
         self.assertEqual(
-            STATUSLINE_MODULE.sum_usage("/nonexistent/x.jsonl")["total"], 0
+            round(sum(m["cost_usd"] for m in usage["per_model"].values()), 6), 1.25
         )
+        self.assertIn("claude-sonnet-4-6", usage["per_model"])
+
+    def test_result_usage_is_the_fallback_when_model_usage_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            usage = REPORT_MODULE.summarise(self._log(directory, model_usage=False))
+        self.assertEqual(usage["output"], 2200)
+        self.assertEqual(usage["cache_read"], 40000)
+        self.assertEqual(usage["per_model"], {})
+
+    def test_result_event_supplies_turns_and_cost(self) -> None:
+        """The provider's own figures beat anything derived by counting."""
+        with tempfile.TemporaryDirectory() as directory:
+            usage = REPORT_MODULE.summarise(self._log(directory))
+        self.assertEqual(usage["turns"], 7)
+        self.assertEqual(usage["cost_usd"], 1.25)
+
+    def test_missing_or_malformed_log_yields_zero(self) -> None:
+        self.assertEqual(REPORT_MODULE.summarise(Path("/nonexistent/x.json"))["total"], 0)
+        with tempfile.TemporaryDirectory() as directory:
+            broken = Path(directory) / "claude-execution.json"
+            broken.write_text("not json", encoding="utf-8")
+            self.assertEqual(REPORT_MODULE.summarise(broken)["total"], 0)
 
     def test_it_reports_only_and_never_enforces(self) -> None:
-        """Reporting only: no budget, no warning, and nothing that kills."""
-        source = STATUSLINE.read_text(encoding="utf-8")
-        for forbidden in ("SIGTERM", "os.kill", "budget", "::error", "::warning"):
+        source = REPORT.read_text(encoding="utf-8")
+        for forbidden in ("SIGTERM", "os.kill", "budget", "::error"):
             self.assertNotIn(forbidden, source)
 
-    def test_wrapper_stages_the_status_line_into_the_sandbox(self) -> None:
-        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
-            encoding="utf-8"
+    def test_the_dead_status_line_is_gone(self) -> None:
+        """It never ran: statusLine is a terminal-UI feature and CI is headless."""
+        self.assertFalse(
+            (self.ROOT / "scripts" / "token_usage_statusline.py").exists()
         )
-        # The action directory is tmpfs'd inside the sandbox, so the script has
-        # to be staged somewhere that is actually bind-mounted.
-        self.assertIn("token_usage_statusline.py", wrapper)
-        self.assertIn('"$sandbox_home/.claude/settings.json"', wrapper)
-        self.assertIn('"statusLine"', wrapper)
-        staged = wrapper.index('statusline="$sandbox_home')
-        self.assertLess(staged, wrapper.index("--tmpfs \"$actions_root\""))
+        bwrap = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(encoding="utf-8")
+        self.assertNotIn("statusLine", bwrap)
+        self.assertNotIn("token_usage_statusline", bwrap)
 
-    def test_usage_file_is_uploaded_with_the_artifact(self) -> None:
+    def test_report_runs_after_the_agent_and_is_uploaded(self) -> None:
         action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts/token_usage_report.py", action)
         self.assertIn(".ai-lean-check/token-usage.json", action)
-        # --setting-sources user is what makes the staged settings load at all.
-        self.assertIn("--setting-sources user", action)
+
+
+class SourcePullRequestCommentTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def test_source_pr_is_told_where_the_generated_pr_is(self) -> None:
+        """The generated PR targets the source branch and is easy to miss."""
+        workflow = yaml.safe_load(
+            (self.ROOT / ".github" / "workflows" / "lean-pr.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        steps = workflow["jobs"]["publish"]["steps"]
+        publish = next(s for s in steps if s.get("id") == "publish")
+        self.assertTrue(publish["uses"].endswith("/publish@main"))
+        comment = next(
+            s for s in steps if "gh pr comment" in str(s.get("run", ""))
+        )
+        self.assertIn("pull-request-url", comment["if"])
+        self.assertIn("worked on this branch", comment["run"])
+        self.assertIn("$GENERATED_PR", comment["run"])
+        self.assertEqual(
+            workflow["jobs"]["publish"]["permissions"]["pull-requests"], "write"
+        )
 
 
 class AllowedToolsTests(unittest.TestCase):

@@ -239,6 +239,11 @@ runs:
           printf '\n' >> .ai-lean-check/claude-summary.txt
         fi
         cat .ai-lean-check/claude-summary.txt
+        # Token use is reported here rather than from a status line. The status
+        # line is an interactive-terminal feature and the base action runs
+        # Claude headlessly, so it never fired and produced no usage file; the
+        # execution log is written unconditionally.
+        python3 "$GITHUB_ACTION_PATH/scripts/token_usage_report.py" || true
 
     - name: Generate and test with Codex
       if: inputs.provider == 'codex' && steps.prepare-agent.outputs.should-run == 'true'
