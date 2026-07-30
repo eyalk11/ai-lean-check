@@ -504,3 +504,30 @@ class TokenUsageStatusLineTests(unittest.TestCase):
         self.assertIn(".ai-lean-check/token-usage.json", action)
         # --setting-sources user is what makes the staged settings load at all.
         self.assertIn("--setting-sources user", action)
+
+
+class AllowedToolsTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def test_bash_is_unrestricted_and_webfetch_is_not_granted(self) -> None:
+        """The sandbox is the boundary, not the per-command allowlist.
+
+        A restricted allowlist refused commands the prompt itself asks for
+        while providing no containment, since the agent can rewrite the one
+        script it permitted. WebFetch stays out because bubblewrap does not
+        restrict network egress.
+        """
+        import yaml
+
+        action = yaml.safe_load(
+            (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        )
+        step = next(
+            s for s in action["runs"]["steps"] if s.get("id") == "claude-agent"
+        )
+        args = step["with"]["claude_args"]
+        self.assertIn("--allowed-tools Read,Glob,Grep,Write,Edit,Bash", args)
+        # Assert against the rendered arguments, not the file: the surrounding
+        # comment explains why WebFetch is withheld and would match the text.
+        self.assertNotIn("Bash(", args)
+        self.assertNotIn("WebFetch", args)

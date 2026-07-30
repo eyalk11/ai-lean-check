@@ -184,6 +184,14 @@ runs:
       shell: bash
       run: bash "$GITHUB_ACTION_PATH/scripts/setup_claude_sandbox.sh"
 
+    # Bash is unrestricted on purpose. The per-command allowlist stopped being
+    # a boundary once the agent had workspace write, because it could rewrite
+    # run-lean-sanitized.sh -- the one command the allowlist permitted. What it
+    # still did was refuse commands the prompt itself asks for: the `git diff
+    # A...B` fallback reads as "multiple operations", and any `2>&1 | tail` is
+    # rejected as shell syntax that cannot be statically analyzed. On PR #32
+    # that burned 4 of 17 Bash turns. The sandbox is the boundary now.
+    # WebFetch stays out: the sandbox does not restrict network egress.
     - name: Generate and test with Claude Code
       id: claude-agent
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
@@ -208,9 +216,7 @@ runs:
           --model ${{ inputs.model || 'claude-sonnet-4-6' }}
           --max-turns ${{ inputs.agent-max-turns }}
           --setting-sources user
-          --allowed-tools
-          Read,Glob,Grep,Write,Edit,Bash(git diff:*),Bash(git status:*),Bash(git
-          log:*),Bash(git show:*),Bash(git rev-parse:*),Bash(.ai-lean-check/run-lean-sanitized.sh:*)
+          --allowed-tools Read,Glob,Grep,Write,Edit,Bash
 
     - name: Capture Claude diagnostics
       if: always() && inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true'
