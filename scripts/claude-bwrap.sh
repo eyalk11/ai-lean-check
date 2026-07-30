@@ -108,6 +108,21 @@ pass_if_set TERM
 # silently capped: observed runs average well under a minute per turn, and a
 # fixed 30 minutes would hard-kill a 120-turn run around turn 47 rather than
 # letting max_turns end it cleanly. The floor keeps short runs generous.
+# Control arm for the probe inside run-lean-sanitized.sh: records what the
+# environment handed to Claude actually contains. Without it, an "absent"
+# reading from the Bash child is ambiguous between stripped and never present.
+# Presence only, never a value.
+probe="$workspace/.ai-lean-check/credential-probe.txt"
+mkdir -p "$(dirname "$probe")"
+for name in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+  eval "probe_value=\${$name:-}"
+  if [[ -n "$probe_value" ]]; then
+    echo "handed-to-claude $name=present" >> "$probe" || true
+  else
+    echo "handed-to-claude $name=absent" >> "$probe" || true
+  fi
+done
+
 turns="${AI_LEAN_AGENT_MAX_TURNS:-0}"
 [[ "$turns" =~ ^[0-9]+$ ]] || turns=0
 timeout_seconds=$(( turns * 60 ))

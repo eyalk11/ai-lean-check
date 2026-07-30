@@ -239,6 +239,17 @@ runs:
           printf '\n' >> .ai-lean-check/claude-summary.txt
         fi
         cat .ai-lean-check/claude-summary.txt
+        # Surface the credential-visibility probe here, where annotations render.
+        # A "present" reading on the Bash-tool arm means Claude Code stopped
+        # stripping recognised credential names, which would make
+        # run-lean-sanitized.sh the only thing keeping the key away from Lean.
+        if [ -f .ai-lean-check/credential-probe.txt ]; then
+          echo "--- credential visibility probe ---"
+          cat .ai-lean-check/credential-probe.txt
+          if grep -q '^bash-tool-child .*=present' .ai-lean-check/credential-probe.txt; then
+            echo "::warning::a provider credential reached a Bash tool child; upstream stripping changed"
+          fi
+        fi
 
     - name: Generate and test with Codex
       if: inputs.provider == 'codex' && steps.prepare-agent.outputs.should-run == 'true'
@@ -284,6 +295,7 @@ runs:
           .ai-lean-check/check-files.txt
           .ai-lean-check/run-lean-sanitized.sh
           .ai-lean-check/token-usage.json
+          .ai-lean-check/credential-probe.txt
         if-no-files-found: warn
         include-hidden-files: true
 

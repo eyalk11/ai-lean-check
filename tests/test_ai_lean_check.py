@@ -531,3 +531,47 @@ class AllowedToolsTests(unittest.TestCase):
         # comment explains why WebFetch is withheld and would match the text.
         self.assertNotIn("Bash(", args)
         self.assertNotIn("WebFetch", args)
+
+
+class CredentialProbeTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def test_both_arms_of_the_probe_exist(self) -> None:
+        """An "absent" reading is only meaningful against a control.
+
+        The Bash-tool arm alone cannot distinguish a credential that was
+        stripped from one that was never in the environment, so the wrapper
+        that launches Claude records what it was handed.
+        """
+        prepare = (self.ROOT / "scripts" / "prepare_agent.py").read_text(
+            encoding="utf-8"
+        )
+        bwrap = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(encoding="utf-8")
+        self.assertIn("bash-tool-child $name=present", prepare)
+        self.assertIn("handed-to-claude $name=present", bwrap)
+
+    def test_probe_records_presence_never_a_value(self) -> None:
+        prepare = (self.ROOT / "scripts" / "prepare_agent.py").read_text(
+            encoding="utf-8"
+        )
+        bwrap = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(encoding="utf-8")
+        for text in (prepare, bwrap):
+            # The probe value is tested for emptiness, never echoed.
+            self.assertNotIn('$probe_value"', text.replace('-n "$probe_value"', ""))
+            self.assertIn("=present", text)
+            self.assertIn("=absent", text)
+
+    def test_probe_writes_only_once_per_run(self) -> None:
+        """The agent invokes the wrapper many times; the probe must not grow."""
+        prepare = (self.ROOT / "scripts" / "prepare_agent.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("grep -q '^bash-tool-child'", prepare)
+
+    def test_regression_is_surfaced_and_uploaded(self) -> None:
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        self.assertIn("credential visibility probe", action)
+        self.assertIn(
+            "::warning::a provider credential reached a Bash tool child", action
+        )
+        self.assertIn(".ai-lean-check/credential-probe.txt", action)

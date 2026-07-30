@@ -235,6 +235,26 @@ def main() -> int:
     wrapper.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
+# Credential-visibility probe. Records presence only, never a value, and only
+# on the first invocation.
+#
+# Claude Code strips the credential names it recognises before spawning a Bash
+# tool child -- measured directly: the same token under an unrecognised name
+# arrives intact, the recognised one does not. That is what makes the unsets
+# below defence in depth rather than the only barrier, and it is upstream
+# behaviour this repository does not control. If a release changes it, this
+# records the fact instead of leaving it to be discovered.
+probe=".ai-lean-check/credential-probe.txt"
+if ! grep -q '^bash-tool-child' "$probe" 2>/dev/null; then
+  for name in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+    eval "probe_value=\\${$name:-}"
+    if [ -n "$probe_value" ]; then
+      echo "bash-tool-child $name=present" >> "$probe" || true
+    else
+      echo "bash-tool-child $name=absent" >> "$probe" || true
+    fi
+  done
+fi
 unset GITHUB_TOKEN GH_TOKEN GITHUB_MODELS_TOKEN
 unset ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
 unset OPENAI_API_KEY ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN XAI_API_KEY
