@@ -426,3 +426,81 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
         )
         self.assertIn("visible_pids", setup)
         self.assertIn("PID isolation is not in effect", setup)
+
+
+STATUSLINE = Path(__file__).parents[1] / "scripts" / "token_usage_statusline.py"
+STATUSLINE_SPEC = importlib.util.spec_from_file_location(
+    "token_usage_statusline", STATUSLINE
+)
+STATUSLINE_MODULE = importlib.util.module_from_spec(STATUSLINE_SPEC)
+assert STATUSLINE_SPEC.loader
+STATUSLINE_SPEC.loader.exec_module(STATUSLINE_MODULE)
+
+
+class TokenUsageStatusLineTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def _transcript(self, directory: str) -> str:
+        path = Path(directory) / "transcript.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "message": {
+                        "usage": {
+                            "input_tokens": 100,
+                            "output_tokens": 50,
+                            "cache_creation_input_tokens": 10,
+                            "cache_read_input_tokens": 1000,
+                        }
+                    }
+                }
+            )
+            + "\n"
+            + json.dumps({"message": {"content": "no usage block"}})
+            + "\nnot json at all\n"
+            + json.dumps(
+                {"message": {"usage": {"input_tokens": 200, "output_tokens": 80}}}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
+    def test_usage_is_summed_cumulatively(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            usage = STATUSLINE_MODULE.sum_usage(self._transcript(directory))
+        self.assertEqual(usage["input"], 300)
+        self.assertEqual(usage["output"], 130)
+        self.assertEqual(usage["cache_write"], 10)
+        self.assertEqual(usage["cache_read"], 1000)
+        self.assertEqual(usage["total"], 1440)
+
+    def test_missing_or_malformed_transcript_yields_zero(self) -> None:
+        self.assertEqual(STATUSLINE_MODULE.sum_usage("")["total"], 0)
+        self.assertEqual(
+            STATUSLINE_MODULE.sum_usage("/nonexistent/x.jsonl")["total"], 0
+        )
+
+    def test_it_reports_only_and_never_enforces(self) -> None:
+        """Reporting only: no budget, no warning, and nothing that kills."""
+        source = STATUSLINE.read_text(encoding="utf-8")
+        for forbidden in ("SIGTERM", "os.kill", "budget", "::error", "::warning"):
+            self.assertNotIn(forbidden, source)
+
+    def test_wrapper_stages_the_status_line_into_the_sandbox(self) -> None:
+        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
+            encoding="utf-8"
+        )
+        # The action directory is tmpfs'd inside the sandbox, so the script has
+        # to be staged somewhere that is actually bind-mounted.
+        self.assertIn("token_usage_statusline.py", wrapper)
+        self.assertIn('"$sandbox_home/.claude/settings.json"', wrapper)
+        self.assertIn('"statusLine"', wrapper)
+        staged = wrapper.index('statusline="$sandbox_home')
+        self.assertLess(staged, wrapper.index("--tmpfs \"$actions_root\""))
+
+    def test_usage_file_is_uploaded_with_the_artifact(self) -> None:
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        self.assertIn(".ai-lean-check/token-usage.json", action)
+        # --setting-sources user is what makes the staged settings load at all.
+        self.assertIn("--setting-sources user", action)

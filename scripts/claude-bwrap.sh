@@ -21,6 +21,25 @@ actions_root="$(realpath -m "$RUNNER_WORKSPACE/../_actions")"
 sandbox_home="$runner_temp/ai-lean-claude-home"
 mkdir -p "$sandbox_home"
 
+# Token-use reporting. The action directory is hidden inside the sandbox, so
+# the script and the user settings that point at it are staged into the sandbox
+# home, which lives under the read-write $RUNNER_TEMP bind. claude_args passes
+# --setting-sources user, so these settings are the ones that get loaded, and
+# the repository cannot contribute any of its own.
+statusline="$sandbox_home/token_usage_statusline.py"
+install -m 700 \
+  "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/token_usage_statusline.py" \
+  "$statusline"
+mkdir -p "$sandbox_home/.claude"
+cat > "$sandbox_home/.claude/settings.json" <<JSON
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python3 $statusline"
+  }
+}
+JSON
+
 if [[ ! -e "$workspace/.git" ]]; then
   echo "::error::$workspace/.git does not exist; cannot make Git metadata read-only" >&2
   exit 1
