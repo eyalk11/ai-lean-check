@@ -126,6 +126,14 @@ inputs:
     description: Newline-separated dependency file globs where baseline assumptions may use sorry/admit.
     required: false
     default: "**/*_deps.lean"
+  ask-publish-on-failure:
+    description: |
+      When independent verification fails but generated files exist, ask the
+      coding agent once whether the partial result is still worth a pull
+      request. The strict yes/no answer is exposed as the publish-on-failure
+      output; anything unclear counts as no. claude-code only.
+    required: false
+    default: "true"
 
 outputs:
   generated-file:
@@ -137,6 +145,9 @@ outputs:
   attempts:
     description: Reserved for compatibility; coding-agent providers manage their own turns.
     value: ${{ steps.verify-agent.outputs.attempts }}
+  publish-on-failure:
+    description: '"true" when verification failed but the agent judged the partial result worth publishing.'
+    value: ${{ steps.publish-verdict.outputs.publish-on-failure }}
 
 runs:
   using: composite
@@ -274,6 +285,56 @@ runs:
         AI_LEAN_SORRY_ALLOWED_FILES: ${{ inputs.sorry-allowed-files }}
       run: python3 "$GITHUB_ACTION_PATH/scripts/verify_agent.py"
 
+    # A verification failure with generated files present is a partial result,
+    # and only the agent has read them all. One cheap read-only query decides
+    # whether they are worth a reviewer's time; the caller may then publish a
+    # clearly-marked pull request instead of discarding the work. Safety
+    # rejections never reach here: on those verify-agent exits before setting
+    # generated-files, and the gate below stays closed.
+    - name: Prepare publish verdict prompt
+      id: verdict-prompt
+      if: >-
+        always() && inputs.provider == 'claude-code'
+        && inputs.ask-publish-on-failure == 'true'
+        && steps.verify-agent.outcome == 'failure'
+        && steps.verify-agent.outputs.generated-files != ''
+      shell: bash
+      env:
+        AI_LEAN_GENERATED_FILES: ${{ steps.verify-agent.outputs.generated-files }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/publish_verdict.py" --prompt
+
+    - name: Ask the agent whether the failed result is worth publishing
+      id: verdict-agent
+      if: always() && steps.verdict-prompt.outcome == 'success'
+      uses: anthropics/claude-code-base-action@main
+      env:
+        AI_LEAN_AGENT_MAX_TURNS: "4"
+        GITHUB_TOKEN: ""
+        GH_TOKEN: ""
+        ACTIONS_RUNTIME_TOKEN: ""
+        ACTIONS_CACHE_URL: ""
+        ACTIONS_RESULTS_URL: ""
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+        ACTIONS_ID_TOKEN_REQUEST_URL: ""
+      with:
+        claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
+        anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
+        prompt_file: .ai-lean-check/publish-verdict-prompt.md
+        path_to_claude_code_executable: ${{ github.action_path }}/scripts/claude-bwrap.sh
+        claude_args: >-
+          --model ${{ inputs.model || 'claude-sonnet-4-6' }}
+          --max-turns 4
+          --setting-sources user
+          --allowed-tools Read,Glob,Grep
+
+    - name: Record publish verdict
+      id: publish-verdict
+      if: always() && steps.verdict-prompt.outcome == 'success'
+      shell: bash
+      env:
+        VERDICT_EXECUTION_FILE: ${{ steps.verdict-agent.outputs.execution_file }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/publish_verdict.py" --parse
+
     - name: Upload generated Lean check
       if: always() && inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@v4
@@ -283,6 +344,7 @@ runs:
           ${{ steps.verify-agent.outputs.generated-files }}
           .ai-lean-check/diagnostics.txt
           .ai-lean-check/agent-prompt.md
+          .ai-lean-check/publish-verdict-prompt.md
           .ai-lean-check/claude-summary.txt
           .ai-lean-check/claude-execution.json
           .ai-lean-check/codex-final.txt

@@ -118,6 +118,14 @@ on:
         required: false
         default: true
         type: boolean
+      ask-publish-on-failure:
+        description: |
+          When verification fails but generated files exist, ask the agent once
+          whether the partial result is worth publishing; on yes, a clearly
+          marked pull request is opened anyway.
+        required: false
+        default: true
+        type: boolean
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
@@ -166,6 +174,8 @@ jobs:
     environment: ${{ inputs.environment-name }}
     permissions:
       contents: read
+    outputs:
+      publish-anyway: ${{ steps.lean.outputs.publish-on-failure }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -209,6 +219,7 @@ jobs:
           tail -c 20000 .ai-lean-check/setup-log.txt || true
 
       - name: Generate and independently verify Lean files
+        id: lean
         uses: eyalk11/ai-lean-check@main
         with:
           provider: ${{ inputs.provider }}
@@ -229,6 +240,7 @@ jobs:
           edit-policy: ${{ inputs.edit-policy }}
           project-mapping-files: ${{ inputs.project-mapping-files }}
           verification-command: ${{ inputs.verification-command }}
+          ask-publish-on-failure: ${{ inputs.ask-publish-on-failure }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -236,11 +248,20 @@ jobs:
 
   publish:
     needs: [inspect, generate]
-    if: inputs.publish && needs.generate.result == 'success'
+    # Also runs when verification failed but the coding agent, asked once,
+    # judged the partial result worth a reviewer's time; the pull request is
+    # then clearly marked as unverified.
+    if: >-
+      always() && inputs.publish && needs.inspect.result == 'success'
+      && (needs.generate.result == 'success'
+          || (needs.generate.result == 'failure'
+              && needs.generate.outputs.publish-anyway == 'true'))
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      pull-request-url: ${{ steps.publish.outputs.pull-request-url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -257,6 +278,8 @@ jobs:
           github-token: ${{ github.token }}
           base-branch: ${{ needs.inspect.outputs.head_branch }}
           source-pr: ${{ needs.inspect.outputs.pr_number }}
+          title: "${{ needs.generate.result != 'success' && format('Formalize PR #{0} in Lean (verification FAILED, partial result)', needs.inspect.outputs.pr_number) || '' }}"
+          body: ${{ needs.generate.result != 'success' && 'Independent verification FAILED; the coding agent judged this partial result worth human review. Read the run diagnostics before trusting anything here, and do not merge as-is.' || 'Generated after independent Lean compilation and a full project build.' }}
 
       # The generated pull request targets the source branch, so without a
       # pointer from the source pull request it is easy to miss entirely.
@@ -267,18 +290,31 @@ jobs:
           PR_NUMBER: ${{ needs.inspect.outputs.pr_number }}
           GENERATED_PR: ${{ steps.publish.outputs.pull-request-url }}
           GENERATED_BRANCH: ${{ steps.publish.outputs.branch }}
+          VERIFIED: ${{ needs.generate.result == 'success' && 'yes' || 'no' }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$VERIFIED" == "yes" ]]; then
+            summary="The automatic AI Lean compiler worked on this branch and its output compiled."
+            detail="Independently verified after the agent finished: \`lake env lean\` on each generated file, then \`lake build\`."
+          else
+            summary="The automatic AI Lean compiler worked on this branch. Verification FAILED, but the agent judged the partial result worth review, so it was published anyway."
+            detail="NOT verified: compilation or a later check failed. See the diagnostics artifact before trusting anything, and do not merge as-is."
+          fi
           body="$(printf '%s\n\n%s\n\n%s\n' \
-            "The automatic AI Lean compiler worked on this branch and its output compiled." \
+            "$summary" \
             "This is $GENERATED_PR (branch \`$GENERATED_BRANCH\`). It targets this pull request's branch, so merging it brings the formalisation here." \
-            "Independently verified after the agent finished: \`lake env lean\` on each generated file, then \`lake build\`. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+            "$detail Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
 
   report-failure:
-    needs: [inspect, generate]
-    if: always() && needs.inspect.result == 'success' && needs.generate.result == 'failure'
+    needs: [inspect, generate, publish]
+    # Skipped when a marked partial-result pull request was published: its own
+    # comment already reports the failure with a link.
+    if: >-
+      always() && needs.inspect.result == 'success'
+      && needs.generate.result == 'failure'
+      && needs.publish.outputs.pull-request-url == ''
     runs-on: ${{ inputs.runner }}
     permissions:
       pull-requests: write

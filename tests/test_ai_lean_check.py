@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -368,6 +369,18 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(f'{name}: ""', action)
 
+    def test_wrapper_is_committed_executable(self) -> None:
+        """The sandbox setup chmods the wrapper at runtime.
+
+        With the file committed non-executable, that chmod flips the tracked
+        mode whenever the action runs from its own checkout (`uses: ./`), and
+        the verifier then rejects the run for a tracked-file change. Committing
+        the executable bit makes the runtime chmod a no-op in Git's eyes.
+        """
+        self.assertTrue(
+            os.access(self.ROOT / "scripts" / "claude-bwrap.sh", os.X_OK)
+        )
+
     def test_wrapper_enforces_requested_boundaries(self) -> None:
         wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
             encoding="utf-8"
@@ -566,6 +579,200 @@ class SourcePullRequestCommentTests(unittest.TestCase):
         self.assertEqual(
             workflow["jobs"]["publish"]["permissions"]["pull-requests"], "write"
         )
+
+
+class PlaceholderScanPolicyTests(unittest.TestCase):
+    """The pre-agent scan reports the baseline under warn and gates under reject."""
+
+    def _scan(self, policy: str) -> tuple[list[str], list[str]]:
+        with tempfile.TemporaryDirectory() as directory:
+            original = os.getcwd()
+            os.chdir(directory)
+            try:
+                subprocess.run(["git", "init", "-q"], check=True)
+                Path("lean").mkdir()
+                Path("lean/legacy_dependencies.lean").write_text(
+                    "example : True := by sorry\n", encoding="utf-8"
+                )
+                Path("lean/theorem_deps.lean").write_text(
+                    "example : True := by sorry\n", encoding="utf-8"
+                )
+                subprocess.run(["git", "add", "."], check=True)
+                env = {
+                    "AI_LEAN_DEPS_SORRY_POLICY": policy,
+                    "AI_LEAN_SORRY_ALLOWED_FILES": "**/*_deps.lean",
+                }
+                with patch.dict(os.environ, env, clear=False):
+                    return MODULE.scan_disallowed_placeholders(
+                        ["*.lean", "**/*.lean"]
+                    )
+            finally:
+                os.chdir(original)
+
+    def test_warn_reports_baseline_placeholders_instead_of_failing(self) -> None:
+        fatal, reported = self._scan("warn")
+        self.assertEqual(fatal, [])
+        self.assertEqual(
+            reported,
+            ["lean/legacy_dependencies.lean:1: sorry is outside a dependency file"],
+        )
+
+    def test_reject_keeps_the_hard_gate(self) -> None:
+        fatal, reported = self._scan("reject")
+        self.assertEqual(reported, [])
+        self.assertIn(
+            "lean/legacy_dependencies.lean:1: sorry is outside a dependency file",
+            fatal,
+        )
+        self.assertIn("lean/theorem_deps.lean:1: dependency uses sorry", fatal)
+
+    def test_prompt_carries_the_baseline_report(self) -> None:
+        findings = [
+            "lean/legacy_dependencies.lean:1: sorry is outside a dependency file"
+        ]
+        prompt = PREPARE_MODULE.build_prompt("base", "head", findings)
+        self.assertIn("## Pre-existing placeholders", prompt)
+        self.assertIn("lean/legacy_dependencies.lean:1", prompt)
+        self.assertIn("not required to fix", prompt)
+        self.assertNotIn(
+            "## Pre-existing placeholders",
+            PREPARE_MODULE.build_prompt("base", "head"),
+        )
+
+    def test_prompt_offers_dependency_files_under_warn(self) -> None:
+        env = {
+            "AI_LEAN_DEPS_SORRY_POLICY": "warn",
+            "AI_LEAN_SORRY_ALLOWED_FILES": "lean/*_deps.lean\nlean/fei_conjectures.lean",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            prompt = PREPARE_MODULE.build_prompt("base", "head")
+        self.assertIn("## Dependency files", prompt)
+        self.assertIn("`lean/*_deps.lean`", prompt)
+        self.assertIn("`lean/fei_conjectures.lean`", prompt)
+        self.assertIn(
+            "proof placeholders outside the dependency files listed above", prompt
+        )
+
+    def test_prompt_keeps_flat_prohibition_under_reject(self) -> None:
+        with patch.dict(
+            os.environ, {"AI_LEAN_DEPS_SORRY_POLICY": "reject"}, clear=False
+        ):
+            prompt = PREPARE_MODULE.build_prompt("base", "head")
+        self.assertNotIn("## Dependency files", prompt)
+        self.assertIn("Do not use proof placeholders, new axioms", prompt)
+
+
+VERDICT = Path(__file__).parents[1] / "scripts" / "publish_verdict.py"
+VERDICT_SPEC = importlib.util.spec_from_file_location("publish_verdict", VERDICT)
+VERDICT_MODULE = importlib.util.module_from_spec(VERDICT_SPEC)
+assert VERDICT_SPEC.loader
+VERDICT_SPEC.loader.exec_module(VERDICT_MODULE)
+
+
+class PublishVerdictTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def test_prompt_lists_files_and_demands_one_word(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            original = os.getcwd()
+            os.chdir(directory)
+            try:
+                Path(".ai-lean-check").mkdir()
+                Path(".ai-lean-check/diagnostics.txt").write_text(
+                    "error: unsolved goals", encoding="utf-8"
+                )
+                env = {"AI_LEAN_GENERATED_FILES": "lean/a.lean\nlean/b.lean"}
+                with patch.dict(os.environ, env, clear=False):
+                    VERDICT_MODULE.build_prompt()
+                prompt = Path(".ai-lean-check/publish-verdict-prompt.md").read_text(
+                    encoding="utf-8"
+                )
+            finally:
+                os.chdir(original)
+        self.assertIn("`lean/a.lean`", prompt)
+        self.assertIn("`lean/b.lean`", prompt)
+        self.assertIn("unsolved goals", prompt)
+        self.assertIn("YES or NO", prompt)
+
+    def test_everything_unclear_counts_as_no(self) -> None:
+        self.assertTrue(VERDICT_MODULE.decide("YES"))
+        self.assertTrue(VERDICT_MODULE.decide("I read the files. Yes"))
+        self.assertFalse(VERDICT_MODULE.decide("NO"))
+        self.assertFalse(VERDICT_MODULE.decide(""))
+        self.assertFalse(VERDICT_MODULE.decide("maybe"))
+        self.assertFalse(VERDICT_MODULE.decide("yes, but overall no"))
+
+    def test_result_event_is_preferred_and_garbage_is_no(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "exec.json"
+            log.write_text(
+                json.dumps(
+                    [
+                        {
+                            "type": "assistant",
+                            "message": {
+                                "content": [{"type": "text", "text": "thinking"}]
+                            },
+                        },
+                        {"type": "result", "result": "YES"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(VERDICT_MODULE.verdict_text(log), "YES")
+            broken = Path(directory) / "broken.json"
+            broken.write_text("not json", encoding="utf-8")
+            self.assertEqual(VERDICT_MODULE.verdict_text(broken), "")
+        self.assertEqual(
+            VERDICT_MODULE.verdict_text(Path("/nonexistent/exec.json")), ""
+        )
+
+    def test_action_wires_the_verdict_after_failed_verification(self) -> None:
+        action = yaml.safe_load((self.ROOT / "action.yml").read_text(encoding="utf-8"))
+        steps = {s.get("id"): s for s in action["runs"]["steps"] if s.get("id")}
+        prompt_step = steps["verdict-prompt"]
+        self.assertIn("steps.verify-agent.outcome == 'failure'", prompt_step["if"])
+        self.assertIn(
+            "steps.verify-agent.outputs.generated-files != ''", prompt_step["if"]
+        )
+        self.assertIn("inputs.ask-publish-on-failure == 'true'", prompt_step["if"])
+        agent_step = steps["verdict-agent"]
+        self.assertIn(
+            "publish-verdict-prompt.md", agent_step["with"]["prompt_file"]
+        )
+        self.assertIn("--max-turns 4", agent_step["with"]["claude_args"])
+        self.assertIn(
+            "--allowed-tools Read,Glob,Grep", agent_step["with"]["claude_args"]
+        )
+        self.assertEqual(agent_step["env"]["GITHUB_TOKEN"], "")
+        self.assertEqual(
+            action["outputs"]["publish-on-failure"]["value"],
+            "${{ steps.publish-verdict.outputs.publish-on-failure }}",
+        )
+
+    def test_reusable_workflow_publishes_on_yes_and_marks_the_pr(self) -> None:
+        workflow = yaml.safe_load(
+            (self.ROOT / ".github" / "workflows" / "lean-pr.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        publish = workflow["jobs"]["publish"]
+        self.assertIn("always()", publish["if"])
+        self.assertIn(
+            "needs.generate.outputs.publish-anyway == 'true'", publish["if"]
+        )
+        publish_step = next(
+            s for s in publish["steps"] if s.get("id") == "publish"
+        )
+        self.assertIn("verification FAILED", publish_step["with"]["title"])
+        # `cond && '' || x` returns x on BOTH branches ('' is falsy), so the
+        # marked title must sit on the not-success branch of the expression.
+        self.assertIn("needs.generate.result != 'success' &&", publish_step["with"]["title"])
+        report = workflow["jobs"]["report-failure"]
+        self.assertIn(
+            "needs.publish.outputs.pull-request-url == ''", report["if"]
+        )
+        self.assertIn("publish", report["needs"])
 
 
 class AllowedToolsTests(unittest.TestCase):

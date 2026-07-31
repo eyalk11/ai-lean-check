@@ -7,7 +7,9 @@ agent cannot modify committed project files.
 ## What it does
 
 1. Installs the toolchain from `lean-toolchain` and runs `lake build`.
-2. Rejects `sorry` or `admit` outside designated dependency files.
+2. Scans committed sources for `sorry`/`admit`: with `deps-sorry-policy: warn`
+   pre-existing placeholders are annotated and reported to the agent as
+   baseline context; with `reject` they fail the run before the agent starts.
 3. Collects the changed Lean source plus configured context.
 4. Gives Claude Code or Codex a constrained task to add one or more Lean files.
 5. Lets the agent run only a credential-scrubbing Lean wrapper.
@@ -16,7 +18,10 @@ agent cannot modify committed project files.
    `git diff --diff-filter=A`, and rejects non-Lean additions.
 8. Rejects unsafe escape hatches in every generated Lean source.
 9. Runs `lake env lean` on every generated file and reruns `lake build`.
-10. Uploads the generated files and diagnostics as `ai-lean-check`.
+10. On verification failure with generated files present, optionally asks the
+    agent once (yes/no) whether the partial result is worth publishing, and
+    exposes the answer as the `publish-on-failure` output.
+11. Uploads the generated files and diagnostics as `ai-lean-check`.
 
 ## Claude Code with a GitHub environment
 
@@ -112,12 +117,19 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `max-input-tokens` | `50000` | Approximate prompt-context cap, estimated conservatively at four UTF-8 bytes per token |
 | `max-output-tokens` | `32768` | Reserved for compatibility; agent actions control their own output |
 | `max-repair-attempts` | `2` | Reserved for compatibility; coding agents repair within their own turns |
-| `deps-sorry-policy` | `warn` | `warn` or `reject` for placeholders inside designated dependency files |
-| `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs |
+| `deps-sorry-policy` | `warn` | `warn` reports pre-existing placeholders (annotations, plus prompt context for out-of-dependency ones); `reject` fails the run on any of them |
+| `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs; under `warn` the agent prompt offers them as the sanctioned home for unavoidable placeholders |
+| `ask-publish-on-failure` | `"true"` | On verification failure with generated files, query the agent once whether the partial result is worth a PR; strict final-word yes/no, anything unclear is no; claude-code only |
 
-The action always fails when `sorry` or `admit` occurs outside a file matched by
-`sorry-allowed-files`. Inside those files, `deps-sorry-policy: warn` emits an
-annotation and continues; `reject` fails.
+Committed sources are scanned for `sorry`/`admit` before the agent runs. With
+`deps-sorry-policy: warn` (the default) every finding becomes a warning
+annotation, findings outside `sorry-allowed-files` are additionally written
+into the agent prompt as project baseline it must not extend, and the run
+continues — like a failing project build, pre-existing placeholders are the
+context the agent needs, not a reason to refuse to run it. With `reject`, any
+finding fails the run before the agent starts. Either way, the verifier
+rejects `sorry`/`admit` outside `sorry-allowed-files` in every file the agent
+adds or edits.
 
 Suggested dependency naming:
 
@@ -188,13 +200,22 @@ The job fails when:
 - the provider is not `claude-code` or `codex`;
 - credentials are absent or invalid;
 - the initial project build fails;
-- ordinary Lean files contain `sorry` or `admit`;
-- dependency placeholders violate `deps-sorry-policy`;
+- committed sources contain `sorry` or `admit` and `deps-sorry-policy` is
+  `reject`;
 - the agent changes tracked files or `HEAD`;
 - generated code uses a forbidden construct;
 - the agent adds a non-Lean project file;
 - a requested target file is missing;
 - any generated file or final `lake build` does not compile.
+
+The check still fails in all of these cases. But when verification failed and
+generated files exist (a compile failure, not a safety rejection — safety
+rejections never expose generated files), `ask-publish-on-failure: "true"`
+additionally asks the agent once, with read-only tools, whether the partial
+result is worth a reviewer's time. The strict final-word YES/NO lands in the
+`publish-on-failure` output; the reusable PR workflow uses it to open a pull
+request clearly marked as an unverified partial result, and anything unclear
+counts as no.
 
 Repository administrators can bypass a required check only if the branch rules
 or ruleset permits bypass. GitHub can be configured to forbid administrator
