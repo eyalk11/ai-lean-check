@@ -281,6 +281,17 @@ in the read-only generation job. The caller appears as one job, but the
 reusable workflow internally isolates PR inspection, AI generation, trusted
 publishing, and failure reporting on separate runners.
 
+By default (`cache: true`) the generation job caches `.lake` and `~/.elan`
+with `actions/cache`, keyed on `lean-toolchain` and `lake-manifest.json`
+(`cache-paths` / `cache-key-files` override both), so repeated runs skip most
+of the toolchain download, `lake exe cache get`, and project build. The cache
+is saved after setup but before the agent runs, so it never contains
+artifacts of generated modules and a failed run still warms the next one. A
+key-file change starts a fresh cache; older caches prefix-match and seed an
+incremental build. For zero-copy warm state instead of a cache, point
+`runner` at a self-hosted runner — GitHub-hosted runners are ephemeral, so
+disk state never survives between runs there.
+
 For cross-repository use, the calling repository must allow the public reusable
 workflow and grant the shown token permissions. Prefer a release tag or commit
 SHA over `@main`. Repository or organization secrets may be passed explicitly;
