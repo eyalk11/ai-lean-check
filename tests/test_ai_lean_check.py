@@ -369,6 +369,18 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(f'{name}: ""', action)
 
+    def test_wrapper_is_committed_executable(self) -> None:
+        """The sandbox setup chmods the wrapper at runtime.
+
+        With the file committed non-executable, that chmod flips the tracked
+        mode whenever the action runs from its own checkout (`uses: ./`), and
+        the verifier then rejects the run for a tracked-file change. Committing
+        the executable bit makes the runtime chmod a no-op in Git's eyes.
+        """
+        self.assertTrue(
+            os.access(self.ROOT / "scripts" / "claude-bwrap.sh", os.X_OK)
+        )
+
     def test_wrapper_enforces_requested_boundaries(self) -> None:
         wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
             encoding="utf-8"
