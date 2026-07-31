@@ -7,7 +7,9 @@ agent cannot modify committed project files.
 ## What it does
 
 1. Installs the toolchain from `lean-toolchain` and runs `lake build`.
-2. Rejects `sorry` or `admit` outside designated dependency files.
+2. Scans committed sources for `sorry`/`admit`: with `deps-sorry-policy: warn`
+   pre-existing placeholders are annotated and reported to the agent as
+   baseline context; with `reject` they fail the run before the agent starts.
 3. Collects the changed Lean source plus configured context.
 4. Gives Claude Code or Codex a constrained task to add one or more Lean files.
 5. Lets the agent run only a credential-scrubbing Lean wrapper.
@@ -112,12 +114,18 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `max-input-tokens` | `50000` | Approximate prompt-context cap, estimated conservatively at four UTF-8 bytes per token |
 | `max-output-tokens` | `32768` | Reserved for compatibility; agent actions control their own output |
 | `max-repair-attempts` | `2` | Reserved for compatibility; coding agents repair within their own turns |
-| `deps-sorry-policy` | `warn` | `warn` or `reject` for placeholders inside designated dependency files |
+| `deps-sorry-policy` | `warn` | `warn` reports pre-existing placeholders (annotations, plus prompt context for out-of-dependency ones); `reject` fails the run on any of them |
 | `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs |
 
-The action always fails when `sorry` or `admit` occurs outside a file matched by
-`sorry-allowed-files`. Inside those files, `deps-sorry-policy: warn` emits an
-annotation and continues; `reject` fails.
+Committed sources are scanned for `sorry`/`admit` before the agent runs. With
+`deps-sorry-policy: warn` (the default) every finding becomes a warning
+annotation, findings outside `sorry-allowed-files` are additionally written
+into the agent prompt as project baseline it must not extend, and the run
+continues — like a failing project build, pre-existing placeholders are the
+context the agent needs, not a reason to refuse to run it. With `reject`, any
+finding fails the run before the agent starts. Either way, the verifier
+rejects `sorry`/`admit` outside `sorry-allowed-files` in every file the agent
+adds or edits.
 
 Suggested dependency naming:
 
@@ -188,8 +196,8 @@ The job fails when:
 - the provider is not `claude-code` or `codex`;
 - credentials are absent or invalid;
 - the initial project build fails;
-- ordinary Lean files contain `sorry` or `admit`;
-- dependency placeholders violate `deps-sorry-policy`;
+- committed sources contain `sorry` or `admit` and `deps-sorry-policy` is
+  `reject`;
 - the agent changes tracked files or `HEAD`;
 - generated code uses a forbidden construct;
 - the agent adds a non-Lean project file;

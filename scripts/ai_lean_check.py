@@ -214,7 +214,9 @@ def setup_diagnostics() -> str:
     )
 
 
-def build_agent_prompt(diff: str, context: str) -> str:
+def build_agent_prompt(
+    diff: str, context: str, baseline_findings: list[str] | None = None
+) -> str:
     legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
     targets = lines(env("AI_LEAN_TARGET_FILES"))
     if not targets and legacy_output:
@@ -273,7 +275,7 @@ than one file holding everything.
 ## Project task
 
 {env("AI_LEAN_TASK", "Generate meaningful checks for the changed Lean declarations.")}
-{setup_diagnostics()}
+{setup_diagnostics()}{baseline_placeholder_block(baseline_findings or [])}
 ## Required imports
 
 ```lean
@@ -544,18 +546,30 @@ def declared_check_files(generated: list[str]) -> tuple[list[str], list[str]]:
     return allowed, rejected
 
 
-def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
+def scan_disallowed_placeholders(pathspecs: list[str]) -> tuple[list[str], list[str]]:
+    """Scan committed sources for sorry/admit and split (fatal, reported).
+
+    The scan sees the project baseline, which the coding agent did not write
+    and (in add-only mode) cannot fix, so pre-existing placeholders are not a
+    reason to refuse to run the agent -- like a failing project build, they are
+    context the agent needs. Under deps-sorry-policy=warn everything becomes a
+    warning annotation and out-of-dependency findings are returned as
+    `reported`, for inclusion in the agent prompt. reject keeps the old hard
+    gate: every finding is fatal and the run stops before the agent starts.
+    The verifier still holds the agent's own added or edited files to the
+    strict policy either way.
+    """
     deps_policy = env("AI_LEAN_DEPS_SORRY_POLICY", "warn").strip().lower()
     if deps_policy not in {"warn", "reject"}:
-        return [f"invalid deps sorry policy: {deps_policy}"]
+        return [f"invalid deps sorry policy: {deps_policy}"], []
     allowed_patterns = lines(env("AI_LEAN_SORRY_ALLOWED_FILES", "**/*_deps.lean"))
     command = ["git", "ls-files"]
     if pathspecs:
         command.extend(["--", *pathspecs])
     result = run(command, check=False)
     if result.returncode != 0:
-        return [f"could not enumerate project files: {result.stderr.strip()}"]
-    fatal_findings: list[str] = []
+        return [f"could not enumerate project files: {result.stderr.strip()}"], []
+    baseline_findings: list[str] = []
     dependency_findings: list[str] = []
     for filename in result.stdout.splitlines():
         path = Path(filename)
@@ -573,15 +587,30 @@ def scan_disallowed_placeholders(pathspecs: list[str]) -> list[str]:
                             f"{filename}:{line_number}: dependency uses {placeholder}"
                         )
                     else:
-                        fatal_findings.append(
+                        baseline_findings.append(
                             f"{filename}:{line_number}: {placeholder} is outside a dependency file"
                         )
-    if dependency_findings and deps_policy == "warn":
-        for finding in dependency_findings:
-            print(f"::warning::{finding}")
-    elif dependency_findings:
-        fatal_findings.extend(dependency_findings)
-    return fatal_findings
+    if deps_policy == "reject":
+        return baseline_findings + dependency_findings, []
+    for finding in dependency_findings + baseline_findings:
+        print(f"::warning::{finding}")
+    return [], baseline_findings
+
+
+def baseline_placeholder_block(findings: list[str]) -> str:
+    """Prompt section telling the agent about pre-existing placeholders."""
+    if not findings:
+        return ""
+    listing = "\n".join(f"- `{finding}`" for finding in findings)
+    return (
+        "\n## Pre-existing placeholders\n\n"
+        "The checked-out project already contains `sorry`/`admit` outside the\n"
+        "designated dependency files, at the locations below. That is baseline\n"
+        "state, not your doing: you are not required to fix it, and the run is\n"
+        "not failed over it. Your own added or edited files must still be free\n"
+        "of such placeholders.\n\n"
+        f"{listing}\n"
+    )
 
 
 DECLARATION_RE = re.compile(
@@ -826,7 +855,7 @@ def prepare_agent() -> int:
         print("No matching Lean changes found; skipping coding agent.")
         set_output("should-run", "false")
         return 0
-    policy_problems = scan_disallowed_placeholders(pathspecs)
+    policy_problems, baseline_findings = scan_disallowed_placeholders(pathspecs)
     if policy_problems:
         print("\n".join(policy_problems), file=sys.stderr)
         return 1
@@ -839,7 +868,9 @@ def prepare_agent() -> int:
     diff = split[0].removeprefix("DIFF:\n")
     context = split[1] if len(split) == 2 else ""
     prompt_path = Path(".ai-lean-check/agent-prompt.md")
-    prompt_path.write_text(build_agent_prompt(diff, context), encoding="utf-8")
+    prompt_path.write_text(
+        build_agent_prompt(diff, context, baseline_findings), encoding="utf-8"
+    )
     Path(".ai-lean-check/baseline-head.txt").write_text(
         run(["git", "rev-parse", "HEAD"]).stdout.strip() + "\n",
         encoding="utf-8",
@@ -1050,12 +1081,14 @@ def main() -> int:
         set_output("attempts", "0")
         return 0
 
-    policy_problems = scan_disallowed_placeholders(pathspecs)
+    policy_problems, baseline_findings = scan_disallowed_placeholders(pathspecs)
     if policy_problems:
         print("\n".join(policy_problems), file=sys.stderr)
         return 1
 
     context = collect_context(lines(env("AI_LEAN_CONTEXT_FILES")))
+    if baseline_findings:
+        context += "\n" + baseline_placeholder_block(baseline_findings)
     combined = truncate_utf8(
         f"DIFF:\n{diff}\n\nCONTEXT:\n{context}",
         max_bytes,

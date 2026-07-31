@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -565,6 +566,65 @@ class SourcePullRequestCommentTests(unittest.TestCase):
         self.assertIn("$GENERATED_PR", comment["run"])
         self.assertEqual(
             workflow["jobs"]["publish"]["permissions"]["pull-requests"], "write"
+        )
+
+
+class PlaceholderScanPolicyTests(unittest.TestCase):
+    """The pre-agent scan reports the baseline under warn and gates under reject."""
+
+    def _scan(self, policy: str) -> tuple[list[str], list[str]]:
+        with tempfile.TemporaryDirectory() as directory:
+            original = os.getcwd()
+            os.chdir(directory)
+            try:
+                subprocess.run(["git", "init", "-q"], check=True)
+                Path("lean").mkdir()
+                Path("lean/legacy_dependencies.lean").write_text(
+                    "example : True := by sorry\n", encoding="utf-8"
+                )
+                Path("lean/theorem_deps.lean").write_text(
+                    "example : True := by sorry\n", encoding="utf-8"
+                )
+                subprocess.run(["git", "add", "."], check=True)
+                env = {
+                    "AI_LEAN_DEPS_SORRY_POLICY": policy,
+                    "AI_LEAN_SORRY_ALLOWED_FILES": "**/*_deps.lean",
+                }
+                with patch.dict(os.environ, env, clear=False):
+                    return MODULE.scan_disallowed_placeholders(
+                        ["*.lean", "**/*.lean"]
+                    )
+            finally:
+                os.chdir(original)
+
+    def test_warn_reports_baseline_placeholders_instead_of_failing(self) -> None:
+        fatal, reported = self._scan("warn")
+        self.assertEqual(fatal, [])
+        self.assertEqual(
+            reported,
+            ["lean/legacy_dependencies.lean:1: sorry is outside a dependency file"],
+        )
+
+    def test_reject_keeps_the_hard_gate(self) -> None:
+        fatal, reported = self._scan("reject")
+        self.assertEqual(reported, [])
+        self.assertIn(
+            "lean/legacy_dependencies.lean:1: sorry is outside a dependency file",
+            fatal,
+        )
+        self.assertIn("lean/theorem_deps.lean:1: dependency uses sorry", fatal)
+
+    def test_prompt_carries_the_baseline_report(self) -> None:
+        findings = [
+            "lean/legacy_dependencies.lean:1: sorry is outside a dependency file"
+        ]
+        prompt = PREPARE_MODULE.build_prompt("base", "head", findings)
+        self.assertIn("## Pre-existing placeholders", prompt)
+        self.assertIn("lean/legacy_dependencies.lean:1", prompt)
+        self.assertIn("not required to fix", prompt)
+        self.assertNotIn(
+            "## Pre-existing placeholders",
+            PREPARE_MODULE.build_prompt("base", "head"),
         )
 
 

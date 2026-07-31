@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from ai_lean_check import scan_disallowed_placeholders
+from ai_lean_check import baseline_placeholder_block, scan_disallowed_placeholders
 
 
 def env(name: str, default: str = "") -> str:
@@ -102,7 +102,9 @@ def turns_block() -> str:
     )
 
 
-def build_prompt(base: str, head: str) -> str:
+def build_prompt(
+    base: str, head: str, baseline_findings: list[str] | None = None
+) -> str:
     legacy_output = env("AI_LEAN_OUTPUT_FILE").strip()
     targets = lines(env("AI_LEAN_TARGET_FILES"))
     if not targets and legacy_output:
@@ -217,7 +219,7 @@ Add one or more Lean source files to the project. The requested files are:
 ## Project task
 
 {task}
-{turns_block()}
+{turns_block()}{baseline_placeholder_block(baseline_findings or [])}
 ## Required imports
 
 ```lean
@@ -230,14 +232,16 @@ def main() -> int:
     work = Path(".ai-lean-check")
     work.mkdir(parents=True, exist_ok=True)
     exclude_action_artifacts()
-    policy_problems = scan_disallowed_placeholders(
+    policy_problems, baseline_findings = scan_disallowed_placeholders(
         lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
     )
     if policy_problems:
         print("\n".join(policy_problems), file=sys.stderr)
         return 1
     base, head = resolve_range()
-    (work / "agent-prompt.md").write_text(build_prompt(base, head), encoding="utf-8")
+    (work / "agent-prompt.md").write_text(
+        build_prompt(base, head, baseline_findings), encoding="utf-8"
+    )
     (work / "baseline-head.txt").write_text(
         run(["git", "rev-parse", "HEAD"]).stdout.strip() + "\n",
         encoding="utf-8",
