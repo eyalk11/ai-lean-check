@@ -18,7 +18,10 @@ agent cannot modify committed project files.
    `git diff --diff-filter=A`, and rejects non-Lean additions.
 8. Rejects unsafe escape hatches in every generated Lean source.
 9. Runs `lake env lean` on every generated file and reruns `lake build`.
-10. Uploads the generated files and diagnostics as `ai-lean-check`.
+10. On verification failure with generated files present, optionally asks the
+    agent once (yes/no) whether the partial result is worth publishing, and
+    exposes the answer as the `publish-on-failure` output.
+11. Uploads the generated files and diagnostics as `ai-lean-check`.
 
 ## Claude Code with a GitHub environment
 
@@ -116,6 +119,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `max-repair-attempts` | `2` | Reserved for compatibility; coding agents repair within their own turns |
 | `deps-sorry-policy` | `warn` | `warn` reports pre-existing placeholders (annotations, plus prompt context for out-of-dependency ones); `reject` fails the run on any of them |
 | `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs; under `warn` the agent prompt offers them as the sanctioned home for unavoidable placeholders |
+| `ask-publish-on-failure` | `"true"` | On verification failure with generated files, query the agent once whether the partial result is worth a PR; strict final-word yes/no, anything unclear is no; claude-code only |
 
 Committed sources are scanned for `sorry`/`admit` before the agent runs. With
 `deps-sorry-policy: warn` (the default) every finding becomes a warning
@@ -203,6 +207,15 @@ The job fails when:
 - the agent adds a non-Lean project file;
 - a requested target file is missing;
 - any generated file or final `lake build` does not compile.
+
+The check still fails in all of these cases. But when verification failed and
+generated files exist (a compile failure, not a safety rejection — safety
+rejections never expose generated files), `ask-publish-on-failure: "true"`
+additionally asks the agent once, with read-only tools, whether the partial
+result is worth a reviewer's time. The strict final-word YES/NO lands in the
+`publish-on-failure` output; the reusable PR workflow uses it to open a pull
+request clearly marked as an unverified partial result, and anything unclear
+counts as no.
 
 Repository administrators can bypass a required check only if the branch rules
 or ruleset permits bypass. GitHub can be configured to forbid administrator
