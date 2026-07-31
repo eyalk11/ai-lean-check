@@ -775,6 +775,48 @@ class PublishVerdictTests(unittest.TestCase):
         self.assertIn("publish", report["needs"])
 
 
+class LeanCacheTests(unittest.TestCase):
+    ROOT = Path(__file__).parents[1]
+
+    def _workflow(self) -> dict:
+        return yaml.safe_load(
+            (self.ROOT / ".github" / "workflows" / "lean-pr.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_cache_inputs_exist_and_default_on(self) -> None:
+        inputs = self._workflow()[True]["workflow_call"]["inputs"]
+        self.assertTrue(inputs["cache"]["default"])
+        self.assertIn(".lake", inputs["cache-paths"]["default"])
+        self.assertIn("lake-manifest.json", inputs["cache-key-files"]["default"])
+
+    def test_restore_precedes_setup_and_save_precedes_the_agent(self) -> None:
+        """The save point is the design: after setup, before the agent.
+
+        Saving later would bake generated-module artifacts into the cache, and
+        saving only on success would let a failing agent cost the next run its
+        warm start.
+        """
+        steps = self._workflow()["jobs"]["generate"]["steps"]
+        index = {
+            step.get("name", step.get("uses", "")): position
+            for position, step in enumerate(steps)
+        }
+        restore = index["Restore Lean cache"]
+        save = index["Save Lean cache"]
+        setup = index["Run project-specific Lean setup"]
+        agent = index["Generate and independently verify Lean files"]
+        self.assertLess(restore, setup)
+        self.assertLess(setup, save)
+        self.assertLess(save, agent)
+        save_step = steps[save]
+        self.assertIn("cache-hit != 'true'", save_step["if"])
+        restore_step = steps[restore]
+        self.assertTrue(restore_step["uses"].startswith("actions/cache/restore@"))
+        self.assertIn("restore-keys", restore_step["with"])
+
+
 class AllowedToolsTests(unittest.TestCase):
     ROOT = Path(__file__).parents[1]
 

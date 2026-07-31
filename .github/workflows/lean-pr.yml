@@ -38,6 +38,32 @@ on:
         required: false
         default: true
         type: boolean
+      cache:
+        description: |
+          Cache the paths in cache-paths between runs with actions/cache, so
+          repeated runs skip most of the Lean setup cost. For zero-copy warm
+          state instead, point `runner` at a self-hosted runner.
+        required: false
+        default: true
+        type: boolean
+      cache-paths:
+        description: Newline-separated paths cached when cache is enabled.
+        required: false
+        default: |
+          .lake
+          ~/.elan
+        type: string
+      cache-key-files:
+        description: |
+          Newline-separated files whose contents key the cache. A change to any
+          of them starts a fresh cache; unchanged files reuse the newest saved
+          one (prefix-matched, so a stale cache still seeds an incremental
+          build).
+        required: false
+        default: |
+          lean-toolchain
+          lake-manifest.json
+        type: string
       use-mathlib-cache:
         description: Value passed to leanprover/lean-action.
         required: false
@@ -193,6 +219,29 @@ jobs:
           lint: false
           use-mathlib-cache: ${{ inputs.use-mathlib-cache }}
 
+      - name: Compute Lean cache key
+        if: inputs.cache
+        id: cache-key
+        shell: bash
+        env:
+          KEY_FILES: ${{ inputs.cache-key-files }}
+        run: |
+          set -euo pipefail
+          hash="$(printf '%s\n' "$KEY_FILES" | sed '/^[[:space:]]*$/d' \
+            | while IFS= read -r file; do
+                sha256sum "$file" 2>/dev/null || echo "missing $file"
+              done | sha256sum | cut -d' ' -f1)"
+          echo "key=ai-lean-check-${{ runner.os }}-$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Lean cache
+        if: inputs.cache
+        id: lean-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ inputs.cache-paths }}
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ai-lean-check-${{ runner.os }}-
+
       # Setup prepares the toolchain and cache; it must not decide whether the
       # coding agent runs. A caller whose setup-command includes `lake build`
       # would otherwise gate the agent on the project already compiling, so a
@@ -217,6 +266,16 @@ jobs:
             echo "::warning::project setup exited ${code}; continuing so the coding agent still runs"
           fi
           tail -c 20000 .ai-lean-check/setup-log.txt || true
+
+      # Saved before the agent runs: the cache then holds only the project's
+      # own build state, never artifacts of generated modules, and a failing
+      # agent or verification cannot cost the next run its warm start.
+      - name: Save Lean cache
+        if: inputs.cache && steps.lean-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ inputs.cache-paths }}
+          key: ${{ steps.cache-key.outputs.key }}
 
       - name: Generate and independently verify Lean files
         id: lean
