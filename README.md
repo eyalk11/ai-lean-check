@@ -115,7 +115,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `max-output-tokens` | `32768` | Reserved for compatibility; agent actions control their own output |
 | `max-repair-attempts` | `2` | Reserved for compatibility; coding agents repair within their own turns |
 | `deps-sorry-policy` | `warn` | `warn` reports pre-existing placeholders (annotations, plus prompt context for out-of-dependency ones); `reject` fails the run on any of them |
-| `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs |
+| `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs; under `warn` the agent prompt offers them as the sanctioned home for unavoidable placeholders |
 
 Committed sources are scanned for `sorry`/`admit` before the agent runs. With
 `deps-sorry-policy: warn` (the default) every finding becomes a warning

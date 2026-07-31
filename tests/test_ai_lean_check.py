@@ -627,6 +627,28 @@ class PlaceholderScanPolicyTests(unittest.TestCase):
             PREPARE_MODULE.build_prompt("base", "head"),
         )
 
+    def test_prompt_offers_dependency_files_under_warn(self) -> None:
+        env = {
+            "AI_LEAN_DEPS_SORRY_POLICY": "warn",
+            "AI_LEAN_SORRY_ALLOWED_FILES": "lean/*_deps.lean\nlean/fei_conjectures.lean",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            prompt = PREPARE_MODULE.build_prompt("base", "head")
+        self.assertIn("## Dependency files", prompt)
+        self.assertIn("`lean/*_deps.lean`", prompt)
+        self.assertIn("`lean/fei_conjectures.lean`", prompt)
+        self.assertIn(
+            "proof placeholders outside the dependency files listed above", prompt
+        )
+
+    def test_prompt_keeps_flat_prohibition_under_reject(self) -> None:
+        with patch.dict(
+            os.environ, {"AI_LEAN_DEPS_SORRY_POLICY": "reject"}, clear=False
+        ):
+            prompt = PREPARE_MODULE.build_prompt("base", "head")
+        self.assertNotIn("## Dependency files", prompt)
+        self.assertIn("Do not use proof placeholders, new axioms", prompt)
+
 
 class AllowedToolsTests(unittest.TestCase):
     ROOT = Path(__file__).parents[1]
