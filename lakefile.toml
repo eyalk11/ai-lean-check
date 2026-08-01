@@ -1,4 +1,4 @@
-name = "ai-lean-check-example"
+name = "ai-lean-generate-example"
 version = "0.1.0"
 defaultTargets = ["Simple"]
 

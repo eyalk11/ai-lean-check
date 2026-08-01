@@ -18,7 +18,7 @@ inputs:
     required: false
     default: ""
   branch-name:
-    description: Branch to create. Empty selects ai-lean-check/pr-<source-pr>-run-<run-id>.
+    description: Branch to create. Empty selects ai-lean-generate/pr-<source-pr>-run-<run-id>.
     required: false
     default: ""
   commit-message:
@@ -108,7 +108,7 @@ runs:
         fi
 
         suffix="${INPUT_SOURCE_PR:-manual}"
-        branch="${INPUT_BRANCH_NAME:-ai-lean-check/pr-${suffix}-run-${GITHUB_RUN_ID}}"
+        branch="${INPUT_BRANCH_NAME:-ai-lean-generate/pr-${suffix}-run-${GITHUB_RUN_ID}}"
         commit_message="${INPUT_COMMIT_MESSAGE:-Formalize PR #${suffix} in Lean}"
         title="${INPUT_TITLE:-Formalize PR #${suffix} in Lean}"
 

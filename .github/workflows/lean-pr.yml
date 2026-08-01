@@ -231,7 +231,7 @@ jobs:
             | while IFS= read -r file; do
                 sha256sum "$file" 2>/dev/null || echo "missing $file"
               done | sha256sum | cut -d' ' -f1)"
-          echo "key=ai-lean-check-${{ runner.os }}-$hash" >> "$GITHUB_OUTPUT"
+          echo "key=ai-lean-generate-${{ runner.os }}-$hash" >> "$GITHUB_OUTPUT"
 
       - name: Restore Lean cache
         if: inputs.cache
@@ -240,7 +240,7 @@ jobs:
         with:
           path: ${{ inputs.cache-paths }}
           key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: ai-lean-check-${{ runner.os }}-
+          restore-keys: ai-lean-generate-${{ runner.os }}-
 
       # Setup prepares the toolchain and cache; it must not decide whether the
       # coding agent runs. A caller whose setup-command includes `lake build`
@@ -256,16 +256,16 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          mkdir -p .ai-lean-check
+          mkdir -p .ai-lean-generate
           if bash --noprofile --norc -uo pipefail -c "$SETUP_COMMAND" \
-               > .ai-lean-check/setup-log.txt 2>&1; then
+               > .ai-lean-generate/setup-log.txt 2>&1; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else
             code=$?
             echo "status=failed" >> "$GITHUB_OUTPUT"
             echo "::warning::project setup exited ${code}; continuing so the coding agent still runs"
           fi
-          tail -c 20000 .ai-lean-check/setup-log.txt || true
+          tail -c 20000 .ai-lean-generate/setup-log.txt || true
 
       # Saved before the agent runs: the cache then holds only the project's
       # own build state, never artifacts of generated modules, and a failing
@@ -279,12 +279,12 @@ jobs:
 
       - name: Generate and independently verify Lean files
         id: lean
-        uses: eyalk11/ai-lean-check@main
+        uses: eyalk11/ai-lean-generate@main
         with:
           provider: ${{ inputs.provider }}
           model: ${{ inputs.model }}
           setup-lean: "false"
-          artifact-name: ai-lean-check-${{ github.run_id }}
+          artifact-name: ai-lean-generate-${{ github.run_id }}
           base-sha: ${{ needs.inspect.outputs.base_sha }}
           head-sha: ${{ needs.inspect.outputs.head_sha }}
           source-paths: ${{ inputs.source-paths }}
@@ -329,9 +329,9 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: ai-lean-check-${{ github.run_id }}
+          name: ai-lean-generate-${{ github.run_id }}
           path: .
-      - uses: eyalk11/ai-lean-check/publish@main
+      - uses: eyalk11/ai-lean-generate/publish@main
         id: publish
         with:
           github-token: ${{ github.token }}
@@ -388,5 +388,5 @@ jobs:
           body="AI Lean generation or verification failed. Use the Lean diagnostics artifact and workflow log to repair the failing generated file, then run this task again.
 
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          Diagnostics artifact, when available: ai-lean-check-${GITHUB_RUN_ID}"
+          Diagnostics artifact, when available: ai-lean-generate-${GITHUB_RUN_ID}"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"

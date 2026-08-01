@@ -1,4 +1,4 @@
-name: AI Lean Check
+name: AI Lean Generate
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: eyalk11/ai-lean-check@v1
+      - uses: eyalk11/ai-lean-generate@v1
         with:
           provider: github
           model: openai/gpt-4o

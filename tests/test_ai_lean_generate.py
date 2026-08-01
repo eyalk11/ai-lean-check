@@ -10,8 +10,8 @@ import unittest
 import yaml
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "ai_lean_check.py"
-SPEC = importlib.util.spec_from_file_location("ai_lean_check", SCRIPT)
+SCRIPT = Path(__file__).parents[1] / "scripts" / "ai_lean_generate.py"
+SPEC = importlib.util.spec_from_file_location("ai_lean_generate", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(MODULE)
@@ -118,7 +118,7 @@ example : True := by
         with patch.dict(
             os.environ,
             {
-                "AI_LEAN_OUTPUT_FILE": ".ai-lean-check/Test.lean",
+                "AI_LEAN_OUTPUT_FILE": ".ai-lean-generate/Test.lean",
                 "AI_LEAN_IMPORTS": "MyProject",
             },
         ):
@@ -187,8 +187,8 @@ example : True := by
             os.chdir(directory)
             try:
                 if contents is not None:
-                    Path(".ai-lean-check").mkdir()
-                    Path(".ai-lean-check/check-files.txt").write_text(
+                    Path(".ai-lean-generate").mkdir()
+                    Path(".ai-lean-generate/check-files.txt").write_text(
                         contents, encoding="utf-8"
                     )
                 return MODULE.declared_check_files(generated)
@@ -554,7 +554,7 @@ class TokenUsageReportTests(unittest.TestCase):
     def test_report_runs_after_the_agent_and_is_uploaded(self) -> None:
         action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/token_usage_report.py", action)
-        self.assertIn(".ai-lean-check/token-usage.json", action)
+        self.assertIn(".ai-lean-generate/token-usage.json", action)
 
 
 class SourcePullRequestCommentTests(unittest.TestCase):
@@ -677,14 +677,14 @@ class PublishVerdictTests(unittest.TestCase):
             original = os.getcwd()
             os.chdir(directory)
             try:
-                Path(".ai-lean-check").mkdir()
-                Path(".ai-lean-check/diagnostics.txt").write_text(
+                Path(".ai-lean-generate").mkdir()
+                Path(".ai-lean-generate/diagnostics.txt").write_text(
                     "error: unsolved goals", encoding="utf-8"
                 )
                 env = {"AI_LEAN_GENERATED_FILES": "lean/a.lean\nlean/b.lean"}
                 with patch.dict(os.environ, env, clear=False):
                     VERDICT_MODULE.build_prompt()
-                prompt = Path(".ai-lean-check/publish-verdict-prompt.md").read_text(
+                prompt = Path(".ai-lean-generate/publish-verdict-prompt.md").read_text(
                     encoding="utf-8"
                 )
             finally:

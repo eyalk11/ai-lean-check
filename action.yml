@@ -1,4 +1,4 @@
-name: AI Lean Check
+name: AI Lean Generate
 description: Generate Lean 4 verification files with a coding agent and compile them independently.
 author: eyalk11
 
@@ -70,7 +70,7 @@ inputs:
   artifact-name:
     description: Name of the generated-files and diagnostics artifact.
     required: false
-    default: ai-lean-check
+    default: ai-lean-generate
   base-sha:
     description: Base commit for the pull-request diff. Defaults to the pull-request base SHA.
     required: false
@@ -221,7 +221,7 @@ runs:
       with:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
-        prompt_file: .ai-lean-check/agent-prompt.md
+        prompt_file: .ai-lean-generate/agent-prompt.md
         path_to_claude_code_executable: ${{ github.action_path }}/scripts/claude-bwrap.sh
         claude_args: >-
           --model ${{ inputs.model || 'claude-sonnet-4-6' }}
@@ -237,19 +237,19 @@ runs:
         CLAUDE_EXECUTION_FILE: ${{ steps.claude-agent.outputs.execution_file }}
         CLAUDE_OUTCOME: ${{ steps.claude-agent.outcome }}
       run: |
-        mkdir -p .ai-lean-check
+        mkdir -p .ai-lean-generate
         {
           echo "step_outcome=${CLAUDE_OUTCOME:-unknown}"
           echo "conclusion=${CLAUDE_CONCLUSION:-unknown}"
           echo "execution_file=${CLAUDE_EXECUTION_FILE:-}"
-        } > .ai-lean-check/claude-summary.txt
+        } > .ai-lean-generate/claude-summary.txt
         if [ -n "${CLAUDE_EXECUTION_FILE:-}" ] && [ -f "$CLAUDE_EXECUTION_FILE" ]; then
-          cp "$CLAUDE_EXECUTION_FILE" .ai-lean-check/claude-execution.json
-          echo "--- execution tail ---" >> .ai-lean-check/claude-summary.txt
-          tail -c 16000 "$CLAUDE_EXECUTION_FILE" >> .ai-lean-check/claude-summary.txt
-          printf '\n' >> .ai-lean-check/claude-summary.txt
+          cp "$CLAUDE_EXECUTION_FILE" .ai-lean-generate/claude-execution.json
+          echo "--- execution tail ---" >> .ai-lean-generate/claude-summary.txt
+          tail -c 16000 "$CLAUDE_EXECUTION_FILE" >> .ai-lean-generate/claude-summary.txt
+          printf '\n' >> .ai-lean-generate/claude-summary.txt
         fi
-        cat .ai-lean-check/claude-summary.txt
+        cat .ai-lean-generate/claude-summary.txt
         # Token use is reported here rather than from a status line. The status
         # line is an interactive-terminal feature and the base action runs
         # Claude headlessly, so it never fired and produced no usage file; the
@@ -264,8 +264,8 @@ runs:
         GH_TOKEN: ""
       with:
         openai-api-key: ${{ env.OPENAI_API_KEY }}
-        prompt-file: .ai-lean-check/agent-prompt.md
-        output-file: .ai-lean-check/codex-final.txt
+        prompt-file: .ai-lean-generate/agent-prompt.md
+        output-file: .ai-lean-generate/codex-final.txt
         model: ${{ inputs.model }}
         sandbox: workspace-write
         safety-strategy: drop-sudo
@@ -319,7 +319,7 @@ runs:
       with:
         claude_code_oauth_token: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
         anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
-        prompt_file: .ai-lean-check/publish-verdict-prompt.md
+        prompt_file: .ai-lean-generate/publish-verdict-prompt.md
         path_to_claude_code_executable: ${{ github.action_path }}/scripts/claude-bwrap.sh
         claude_args: >-
           --model ${{ inputs.model || 'claude-sonnet-4-6' }}
@@ -342,15 +342,15 @@ runs:
         name: ${{ inputs.artifact-name }}
         path: |
           ${{ steps.verify-agent.outputs.generated-files }}
-          .ai-lean-check/diagnostics.txt
-          .ai-lean-check/agent-prompt.md
-          .ai-lean-check/publish-verdict-prompt.md
-          .ai-lean-check/claude-summary.txt
-          .ai-lean-check/claude-execution.json
-          .ai-lean-check/codex-final.txt
-          .ai-lean-check/check-files.txt
-          .ai-lean-check/run-lean-sanitized.sh
-          .ai-lean-check/token-usage.json
+          .ai-lean-generate/diagnostics.txt
+          .ai-lean-generate/agent-prompt.md
+          .ai-lean-generate/publish-verdict-prompt.md
+          .ai-lean-generate/claude-summary.txt
+          .ai-lean-generate/claude-execution.json
+          .ai-lean-generate/codex-final.txt
+          .ai-lean-generate/check-files.txt
+          .ai-lean-generate/run-lean-sanitized.sh
+          .ai-lean-generate/token-usage.json
         if-no-files-found: warn
         include-hidden-files: true
 
@@ -358,5 +358,5 @@ runs:
       if: inputs.provider == 'claude-code' && steps.prepare-agent.outputs.should-run == 'true' && steps.claude-agent.outcome != 'success'
       shell: bash
       run: |
-        cat .ai-lean-check/claude-summary.txt || true
+        cat .ai-lean-generate/claude-summary.txt || true
         exit 1

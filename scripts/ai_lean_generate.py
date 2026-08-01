@@ -138,7 +138,7 @@ def truncate_utf8(value: str, byte_limit: int) -> str:
     encoded = value.encode("utf-8")
     if len(encoded) <= byte_limit:
         return value
-    marker = b"\n\n[context truncated by ai-lean-check]\n"
+    marker = b"\n\n[context truncated by ai-lean-generate]\n"
     return (encoded[: max(0, byte_limit - len(marker))] + marker).decode(
         "utf-8", errors="ignore"
     )
@@ -198,7 +198,7 @@ def setup_diagnostics() -> str:
     project that does not currently build is the case the agent is most needed
     for, and the build output is the most useful context it can be given.
     """
-    log = Path(".ai-lean-check/setup-log.txt")
+    log = Path(".ai-lean-generate/setup-log.txt")
     if not log.is_file():
         return ""
     text = log.read_text(encoding="utf-8", errors="ignore").strip()
@@ -234,7 +234,7 @@ def build_agent_prompt(
         if dep_block
         else "`sorry`, `admit`"
     )
-    return f"""# AI Lean check task
+    return f"""# AI Lean generate task
 
 Add one or more Lean source files to the project. The requested files are:
 
@@ -272,9 +272,9 @@ than one file holding everything.
 4. Do not use {sorry_rule}, new axioms, unsafe declarations, `run_cmd`,
    `#eval`, `#compile`, initializers, foreign declarations, IO, System/process
    access, or shell/file/network access from Lean.
-5. Run `.ai-lean-check/run-lean-sanitized.sh check <file>` for every added file.
+5. Run `.ai-lean-generate/run-lean-sanitized.sh check <file>` for every added file.
 6. On failure, use the Lean log to fix that specific file and rerun its check.
-7. Once it compiles, run `.ai-lean-check/run-lean-sanitized.sh build`.
+7. Once it compiles, run `.ai-lean-generate/run-lean-sanitized.sh build`.
 8. Finish only when both commands succeed. The workflow independently reruns
    both commands and records their complete logs.
 
@@ -543,7 +543,7 @@ def declared_check_files(generated: list[str]) -> tuple[list[str], list[str]]:
     names and the rejected ones, so the caller can fail on a bad declaration
     instead of silently checking something else.
     """
-    declaration = Path(".ai-lean-check/check-files.txt")
+    declaration = Path(".ai-lean-generate/check-files.txt")
     if not declaration.is_file():
         return [], []
     requested = lines(declaration.read_text(encoding="utf-8", errors="ignore"))
@@ -882,7 +882,7 @@ def set_multiline_output(name: str, value: str) -> None:
 
 
 def prepare_agent() -> int:
-    Path(".ai-lean-check").mkdir(parents=True, exist_ok=True)
+    Path(".ai-lean-generate").mkdir(parents=True, exist_ok=True)
     pathspecs = lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
     diff = collect_diff(pathspecs)
     if not diff.strip():
@@ -901,15 +901,15 @@ def prepare_agent() -> int:
     split = combined.split("\n\nCONTEXT:\n", 1)
     diff = split[0].removeprefix("DIFF:\n")
     context = split[1] if len(split) == 2 else ""
-    prompt_path = Path(".ai-lean-check/agent-prompt.md")
+    prompt_path = Path(".ai-lean-generate/agent-prompt.md")
     prompt_path.write_text(
         build_agent_prompt(diff, context, baseline_findings), encoding="utf-8"
     )
-    Path(".ai-lean-check/baseline-head.txt").write_text(
+    Path(".ai-lean-generate/baseline-head.txt").write_text(
         run(["git", "rev-parse", "HEAD"]).stdout.strip() + "\n",
         encoding="utf-8",
     )
-    wrapper_path = Path(".ai-lean-check/run-lean-sanitized.sh")
+    wrapper_path = Path(".ai-lean-generate/run-lean-sanitized.sh")
     wrapper_path.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
@@ -935,9 +935,9 @@ def verify_agent_result() -> int:
     targets = lines(env("AI_LEAN_TARGET_FILES"))
     if not targets and legacy_output:
         targets = [Path(legacy_output).as_posix()]
-    diagnostics_path = Path(".ai-lean-check/diagnostics.txt")
+    diagnostics_path = Path(".ai-lean-generate/diagnostics.txt")
     diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
-    baseline_path = Path(".ai-lean-check/baseline-head.txt")
+    baseline_path = Path(".ai-lean-generate/baseline-head.txt")
     baseline_head = (
         baseline_path.read_text(encoding="utf-8").strip()
         if baseline_path.is_file()
@@ -974,7 +974,7 @@ def verify_agent_result() -> int:
     untracked = [
         item.strip()
         for item in untracked_result.stdout.splitlines()
-        if item.strip() and not item.replace("\\", "/").startswith(".ai-lean-check/")
+        if item.strip() and not item.replace("\\", "/").startswith(".ai-lean-generate/")
     ]
     non_lean = [item for item in untracked if not item.lower().endswith(".lean")]
     untracked_lean = sorted(item for item in untracked if item.lower().endswith(".lean"))
@@ -1104,7 +1104,7 @@ def verify_agent_result() -> int:
 def main() -> int:
     max_bytes = context_byte_limit()
     max_repairs = int(env("AI_LEAN_MAX_REPAIRS", "2"))
-    output = Path(env("AI_LEAN_OUTPUT_FILE", ".ai-lean-check/GeneratedCheck.lean"))
+    output = Path(env("AI_LEAN_OUTPUT_FILE", ".ai-lean-generate/GeneratedCheck.lean"))
     output.parent.mkdir(parents=True, exist_ok=True)
 
     pathspecs = lines(env("AI_LEAN_SOURCE_PATHS", "*.lean\n**/*.lean"))
@@ -1135,7 +1135,7 @@ def main() -> int:
     attempts = 0
     for attempt in range(max_repairs + 1):
         attempts = attempt + 1
-        print(f"AI Lean check attempt {attempts}/{max_repairs + 1}")
+        print(f"AI Lean generate attempt {attempts}/{max_repairs + 1}")
         code = call_model(build_prompt(diff, context, diagnostics))
         output.write_text(code, encoding="utf-8")
         security_problems = validate(code)

@@ -8,8 +8,8 @@ from pathlib import Path
 import re
 
 
-SCRIPT = Path(__file__).with_name("ai_lean_check.py")
-SPEC = importlib.util.spec_from_file_location("ai_lean_check_impl", SCRIPT)
+SCRIPT = Path(__file__).with_name("ai_lean_generate.py")
+SPEC = importlib.util.spec_from_file_location("ai_lean_generate_impl", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"could not load verifier implementation from {SCRIPT}")
 

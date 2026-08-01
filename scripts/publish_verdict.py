@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 
 
-PROMPT_PATH = Path(".ai-lean-check/publish-verdict-prompt.md")
+PROMPT_PATH = Path(".ai-lean-generate/publish-verdict-prompt.md")
 
 
 def env(name: str, default: str = "") -> str:
@@ -24,7 +24,7 @@ def build_prompt() -> int:
         if line.strip()
     ]
     listing = "\n".join(f"- `{name}`" for name in generated)
-    diagnostics_path = Path(".ai-lean-check/diagnostics.txt")
+    diagnostics_path = Path(".ai-lean-generate/diagnostics.txt")
     diagnostics = (
         diagnostics_path.read_text(encoding="utf-8", errors="ignore")[-6000:]
         if diagnostics_path.is_file()

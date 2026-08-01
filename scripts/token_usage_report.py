@@ -2,7 +2,7 @@
 """Summarise the coding agent's token use after a run. Reporting only.
 
 Reads the base action's execution log and writes
-`.ai-lean-check/token-usage.json` so a finished run carries its own cost
+`.ai-lean-generate/token-usage.json` so a finished run carries its own cost
 record in the uploaded artifact.
 
 This replaces an earlier attempt to report the same numbers from a Claude Code
@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import sys
 
-WORK = Path(".ai-lean-check")
+WORK = Path(".ai-lean-generate")
 
 FIELDS = {
     "input": "input_tokens",

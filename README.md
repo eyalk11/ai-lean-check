@@ -1,6 +1,6 @@
-# AI Lean Check
+# AI Lean Generate
 
-`ai-lean-check` is a GitHub composite action that asks Claude Code or Codex to
+`ai-lean-generate` is a GitHub composite action that asks Claude Code or Codex to
 add focused Lean files to a project and then independently compiles them. The
 agent cannot modify committed project files.
 
@@ -21,7 +21,7 @@ agent cannot modify committed project files.
 10. On verification failure with generated files present, optionally asks the
     agent once (yes/no) whether the partial result is worth publishing, and
     exposes the answer as the `publish-on-failure` output.
-11. Uploads the generated files and diagnostics as `ai-lean-check`.
+11. Uploads the generated files and diagnostics as `ai-lean-generate`.
 
 ## Claude Code with a GitHub environment
 
@@ -30,7 +30,7 @@ composite action. If an environment named `main` contains an API-key secret
 named `CLAUDE_CODE_KEY`, use:
 
 ```yaml
-name: AI Lean Check
+name: AI Lean Generate
 
 on:
   pull_request:
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - uses: eyalk11/ai-lean-check@main
+      - uses: eyalk11/ai-lean-generate@main
         with:
           provider: claude-code
           source-paths: |
@@ -79,7 +79,7 @@ GitHub protection rules.
 ## Codex
 
 ```yaml
-      - uses: eyalk11/ai-lean-check@main
+      - uses: eyalk11/ai-lean-generate@main
         with:
           provider: codex
           imports: |
@@ -110,7 +110,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `build-project` | `"true"` | Run the initial `lake build` when Lean setup is enabled |
 | `use-mathlib-cache` | `auto` | Passed to `leanprover/lean-action` |
 | `upload-artifact` | `"true"` | Upload generated source, prompt, and diagnostics |
-| `artifact-name` | `ai-lean-check` | Artifact name; use a run-specific value when a separate publishing job downloads it |
+| `artifact-name` | `ai-lean-generate` | Artifact name; use a run-specific value when a separate publishing job downloads it |
 | `base-sha` | PR base or `HEAD^` | Explicit base revision for the Lean diff |
 | `head-sha` | PR head or `HEAD` | Explicit head revision for the Lean diff |
 | `max-context-bytes` | `200000` | Legacy context cap used only if `max-input-tokens` is empty |
@@ -140,7 +140,7 @@ Lean/theorem_3_11.lean
 
 ## Additional Lean setup steps
 
-Add arbitrary setup steps to the caller workflow before `ai-lean-check`. If
+Add arbitrary setup steps to the caller workflow before `ai-lean-generate`. If
 those steps install the toolchain and build the project, set `setup-lean:
 "false"` so the composite action does not repeat that work:
 
@@ -148,7 +148,7 @@ those steps install the toolchain and build the project, set `setup-lean:
       - uses: actions/checkout@v4
       - name: Project-specific setup
         run: ./scripts/prepare-lean-project.sh
-      - uses: eyalk11/ai-lean-check@main
+      - uses: eyalk11/ai-lean-generate@main
         with:
           provider: claude-code
           setup-lean: "false"
@@ -229,12 +229,12 @@ write-capable GitHub credentials:
 ```yaml
       - name: Generate and verify
         id: lean
-        uses: eyalk11/ai-lean-check@main
+        uses: eyalk11/ai-lean-generate@main
         # provider inputs and credential environment omitted
 
       - name: Publish verified additions
         if: steps.lean.outcome == 'success'
-        uses: eyalk11/ai-lean-check/publish@main
+        uses: eyalk11/ai-lean-generate/publish@main
         with:
           github-token: ${{ github.token }}
           generated-files: ${{ steps.lean.outputs.generated-files }}
@@ -261,7 +261,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: eyalk11/ai-lean-check/.github/workflows/lean-pr.yml@main
+    uses: eyalk11/ai-lean-generate/.github/workflows/lean-pr.yml@main
     with:
       pr-number: ${{ inputs.pr_number }}
       environment-name: main
