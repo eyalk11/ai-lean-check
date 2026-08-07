@@ -115,7 +115,7 @@ All composite-action inputs are strings. Write booleans as `"true"` or
 | `head-sha` | PR head or `HEAD` | Explicit head revision for the Lean diff |
 | `max-context-bytes` | `200000` | Legacy context cap used only if `max-input-tokens` is empty |
 | `max-input-tokens` | `50000` | Approximate prompt-context cap, estimated conservatively at four UTF-8 bytes per token |
-| `max-output-tokens` | `32768` | Reserved for compatibility; agent actions control their own output |
+| `max-output-tokens` | `128000` | Per-response output-token cap, passed to the agent as `CLAUDE_CODE_MAX_OUTPUT_TOKENS`; the CLI's own default of 32000 fails long runs with `response exceeded the 32000 output token maximum` |
 | `max-repair-attempts` | `2` | Reserved for compatibility; coding agents repair within their own turns |
 | `deps-sorry-policy` | `warn` | `warn` reports pre-existing placeholders (annotations, plus prompt context for out-of-dependency ones); `reject` fails the run on any of them |
 | `sorry-allowed-files` | `**/*_deps.lean` | Newline-separated dependency-file globs; under `warn` the agent prompt offers them as the sanctioned home for unavoidable placeholders |

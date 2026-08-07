@@ -96,6 +96,11 @@ on:
         required: false
         default: "50000"
         type: string
+      max-output-tokens:
+        description: Per-response output-token cap for the agent.
+        required: false
+        default: "128000"
+        type: string
       agent-max-turns:
         description: Maximum Claude Code turns.
         required: false
@@ -292,6 +297,7 @@ jobs:
           imports: ${{ inputs.imports }}
           task: ${{ inputs.task }}
           max-input-tokens: ${{ inputs.max-input-tokens }}
+          max-output-tokens: ${{ inputs.max-output-tokens }}
           agent-max-turns: ${{ inputs.agent-max-turns }}
           deps-sorry-policy: ${{ inputs.deps-sorry-policy }}
           sorry-allowed-files: ${{ inputs.sorry-allowed-files }}

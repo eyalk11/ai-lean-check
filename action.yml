@@ -88,9 +88,9 @@ inputs:
     required: false
     default: "50000"
   max-output-tokens:
-    description: Maximum output tokens requested from the provider per attempt.
+    description: Per-response output-token cap passed to the agent as CLAUDE_CODE_MAX_OUTPUT_TOKENS.
     required: false
-    default: "32768"
+    default: "128000"
   deps-sorry-policy:
     description: Handling of sorry/admit inside designated dependency files. One of warn or reject.
     required: false
@@ -211,6 +211,9 @@ runs:
         # Read by claude-bwrap.sh to scale the sandbox timeout with the turn
         # budget. Not passed into the sandbox itself; --clearenv drops it.
         AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}
+        # Forwarded into the sandbox by claude-bwrap.sh. The CLI defaults to
+        # 32000 per response, which is what killed the run on PR #129.
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
         ACTIONS_RUNTIME_TOKEN: ""
@@ -309,6 +312,7 @@ runs:
       uses: anthropics/claude-code-base-action@main
       env:
         AI_LEAN_AGENT_MAX_TURNS: "4"
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
         GITHUB_TOKEN: ""
         GH_TOKEN: ""
         ACTIONS_RUNTIME_TOKEN: ""

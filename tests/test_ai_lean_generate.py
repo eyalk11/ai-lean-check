@@ -411,6 +411,23 @@ class ClaudeSandboxConfigurationTests(unittest.TestCase):
             "AI_LEAN_AGENT_MAX_TURNS: ${{ inputs.agent-max-turns }}", action
         )
 
+    def test_the_output_cap_reaches_the_cli(self) -> None:
+        """Setting it on the step is not enough: --clearenv drops the rest.
+
+        The /run-lean run on PR #129 died on "response exceeded the 32000
+        output token maximum" 36 turns into a 120-turn budget, so this cap --
+        not agent-max-turns -- is what ends long runs. It only takes effect if
+        the step exports it AND the wrapper forwards it through --clearenv.
+        """
+        action = (self.ROOT / "action.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}", action
+        )
+        wrapper = (self.ROOT / "scripts" / "claude-bwrap.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("pass_if_set CLAUDE_CODE_MAX_OUTPUT_TOKENS", wrapper)
+
     def test_root_bind_precedes_proc_and_dev(self) -> None:
         """The ordering is the isolation.
 
