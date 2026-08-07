@@ -88,7 +88,7 @@ inputs:
     required: false
     default: "50000"
   max-output-tokens:
-    description: Maximum output tokens requested from the provider per attempt.
+    description: Deprecated and ignored in coding-agent mode.
     required: false
     default: "32768"
   deps-sorry-policy:
