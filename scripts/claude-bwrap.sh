@@ -79,6 +79,12 @@ pass_if_set ANTHROPIC_BASE_URL
 pass_if_set ANTHROPIC_CUSTOM_HEADERS
 pass_if_set CLAUDE_CODE_ACTION
 
+# The per-response output cap. PR #129's run died on "response exceeded the
+# 32000 output token maximum" -- the CLI's own default -- 36 turns into a
+# 120-turn budget, so the cap, not the turn limit, is what ends long runs.
+# --clearenv drops this unless it is passed through explicitly.
+pass_if_set CLAUDE_CODE_MAX_OUTPUT_TOKENS
+
 # Locale and terminal hints are non-secret and avoid avoidable CLI issues.
 pass_if_set LANG
 pass_if_set LC_ALL
